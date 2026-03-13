@@ -1,37 +1,119 @@
-# MCP Server Configuration for Suno AI Automation
-# This file configures the Suno MCP server for use with MCP-compatible clients
+# MCP Server Configuration — suno-mcp v2.2.1
+# https://github.com/arlinamid/suno-mcp
 
 server:
   name: suno-mcp
-  version: "1.0.0"
-  description: "MCP Server for automated Suno AI music generation"
+  version: "2.2.1"
+  description: >
+    MCP server for Suno AI music generation with full v5 support,
+    browser-assisted hCaptcha bypass, secure session management,
+    and a complete terminal CLI.
 
-  # Command to run the server
   command: python
   args:
     - "-m"
     - "suno_mcp.server"
 
-  # Environment variables
   env:
     PYTHONPATH: "src"
     PYTHONUNBUFFERED: "1"
 
-  # Capabilities this server provides
   capabilities:
     tools: {}
+    prompts: {}
+    resources: {}
 
+# ─────────────────────────────────────────────
 # Server metadata
-metadata:
-  author: "Sandra Schipal"
-  license: "MIT"
-  repository: "https://github.com/sandra/suno-mcp"
-  documentation: "https://suno-mcp.readthedocs.io/"
+# ─────────────────────────────────────────────
 
-# Tool categories
+metadata:
+  author: "arlinamid"
+  license: "MIT"
+  repository: "https://github.com/arlinamid/suno-mcp"
+  changelog: "https://github.com/arlinamid/suno-mcp/blob/main/CHANGELOG.md"
+  forked_from: "https://github.com/sandraschi/suno-mcp"
+
+# ─────────────────────────────────────────────
+# Tools
+# ─────────────────────────────────────────────
+
 tools:
-  basic:
-    description: "Basic Suno AI music generation tools"
+
+  auth:
+    description: "Login, session management, and credential storage"
+    tools:
+      - suno_browser_login
+      - suno_api_check_auth
+      - suno_session_info
+      - suno_refresh_session
+      - suno_save_cookie
+      - suno_save_token
+      - suno_credential_status
+      - suno_clear_credentials
+
+  generation:
+    description: "Music generation — browser-assisted hCaptcha bypass, full v5 support"
+    tools:
+      - suno_api_generate
+      - suno_api_extend
+      - suno_api_remix
+      - suno_api_inpaint
+      - suno_api_wait_for_song
+      - suno_api_generate_lyrics
+      - suno_api_generate_stems
+      - suno_api_concat_song
+
+  library:
+    description: "Browse and search the Suno song catalogue"
+    tools:
+      - suno_api_get_my_songs
+      - suno_api_get_song
+      - suno_api_get_liked_songs
+      - suno_api_get_trending
+      - suno_api_search
+      - suno_api_get_lyric_alignment
+
+  playlists:
+    description: "Create and manage playlists"
+    tools:
+      - suno_api_get_my_playlists
+      - suno_api_get_playlist
+      - suno_api_create_playlist
+      - suno_api_update_playlist
+      - suno_api_add_to_playlist
+      - suno_api_remove_from_playlist
+
+  song_actions:
+    description: "Interact with individual songs"
+    tools:
+      - suno_api_like_song
+      - suno_api_make_public
+      - suno_api_delete_song
+
+  downloads:
+    description: "Download audio and artwork locally"
+    tools:
+      - suno_api_download_song
+      - suno_api_download_playlist
+      - suno_api_download_my_songs
+
+  personas:
+    description: "Persona management — consistent vocal characters (Pro)"
+    tools:
+      - suno_api_get_persona
+      - suno_api_get_my_personas
+      - suno_api_get_featured_personas
+
+  account:
+    description: "Account, billing, and subscription information"
+    tools:
+      - suno_api_get_credits
+      - suno_api_get_subscription_plans
+      - suno_api_get_contests
+
+  legacy_browser:
+    description: "Original Playwright browser-automation tools (superseded by API tools)"
     tools:
       - suno_open_browser
       - suno_login
@@ -40,62 +122,155 @@ tools:
       - suno_get_status
       - suno_close_browser
 
-  studio:
-    description: "Suno Studio DAW automation tools"
+  server:
+    description: "Server diagnostics and help"
     tools:
-      - studio_open
-      - studio_close
-      - studio_create_project
-      - studio_generate_stem
-      - studio_open_project
-      - studio_save_project
-      - studio_generate_multiple_stems
-      - studio_wait_generation
-      - studio_arrange_track
-      - studio_set_bpm
-      - studio_create_sections
-      - studio_adjust_volume
-      - studio_add_effect
-      - studio_export_project
-      - studio_export_section
-      - studio_get_status
-      - studio_get_generation_status
-      - studio_list_projects
+      - get_server_status
+      - help
 
-# Configuration options
-config:
-  browser:
-    headless: true
-    default_viewport:
-      width: 1920
-      height: 1080
-    user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# ─────────────────────────────────────────────
+# Prompts
+# ─────────────────────────────────────────────
 
-  timeouts:
-    navigation: 30000
-    element: 10000
-    page_load: 60000
+prompts:
+  description: "Reusable prompt templates — guide the LLM through complete Suno workflows"
+  prompts:
+    - name: compose_song
+      description: >
+        Full v5 song composition workflow: writes style field (<=200 chars,
+        anchor technique), structures lyrics with meta-tags, picks advanced
+        parameters, and calls suno_api_generate.
+      parameters:
+        - theme
+        - genre        # default: pop
+        - mood         # default: upbeat
+        - language     # default: english
+        - structure    # default: verse-chorus
 
-  paths:
-    downloads: "downloads/"
-    temp: "temp/"
-    exports: "exports/"
+    - name: find_inspiration
+      description: >
+        Fetches trending songs, analyses dominant genres/moods,
+        and proposes an original song concept.
+      parameters:
+        - genre        # default: any
+        - period       # default: week
 
-  suno:
-    base_url: "https://app.suno.ai"
-    studio_url: "https://studio.suno.ai"
-    api_timeout: 120000
+    - name: remix_track
+      description: >
+        Inspects an existing song's metadata then calls suno_api_remix
+        with a new creative direction.
+      parameters:
+        - song_id
+        - direction    # default: different genre
+        - preserve     # default: melody
 
-# Logging configuration
-logging:
-  level: "INFO"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "logs/suno-mcp.log"
+    - name: create_playlist
+      description: >
+        Creates a named playlist and populates it from the library.
+      parameters:
+        - name
+        - description  # default: ""
+        - song_ids     # default: "" (comma-separated)
 
-# Security settings
+# ─────────────────────────────────────────────
+# Resources
+# ─────────────────────────────────────────────
+
+resources:
+  description: "Contextual data sources readable by any MCP client"
+  resources:
+    - uri: suno://models
+      type: static
+      description: >
+        All model aliases with full API names, capabilities, and recommended use cases.
+        Covers: v5/chirp-crow, v4.5x/chirp-bluejay, v4.5/chirp-auk, v4, v3.5, v3.
+
+    - uri: suno://style-tags
+      type: static
+      description: >
+        Curated tag catalogue by: genre, mood, vocal style, production/instruments,
+        BPM range, and key.
+
+    - uri: suno://prompt-guide
+      type: static
+      description: >
+        Suno v5 prompting master reference: two-field model (style vs lyrics),
+        anchor descriptor technique, full tag taxonomy ([Mood], [Energy],
+        [Instrument], [Texture], [Callback], timed tags), 6-12 syllable rule,
+        common issues and fixes, loop-friendly track guide, Persona and Inspo usage.
+
+    - uri: suno://credits
+      type: live
+      description: "Current credit balance and subscription plan (live API call)."
+
+    - uri: suno://trending
+      type: live
+      description: "Top trending songs feed, all-time (live API call)."
+
+    - uri: suno://my-library
+      type: live
+      description: "Authenticated user's personal song library, page 0 (live API call)."
+
+# ─────────────────────────────────────────────
+# CLI entry points
+# ─────────────────────────────────────────────
+
+cli:
+  description: "Terminal CLI — pip install -e . installs the suno command"
+  entry_points:
+    - command: suno-mcp
+      module: suno_mcp.server:main
+      description: "Run the MCP server (stdio transport for Claude Desktop / Cursor)"
+    - command: suno-mcp-api
+      module: suno_mcp.server:main_api
+      description: "Run the FastAPI HTTP interface"
+    - command: suno
+      module: suno_mcp.cli:main
+      description: "Interactive CLI — 43 commands covering all Suno features"
+
+# ─────────────────────────────────────────────
+# Generation behaviour
+# ─────────────────────────────────────────────
+
+generation:
+  mechanism: browser-assisted
+  description: >
+    Suno's /generate/v2-web/ endpoint requires hCaptcha. This server opens a
+    non-headless Chromium window (~15 s), fills the Advanced mode form, clicks
+    Create so the browser solves hCaptcha naturally, then intercepts the outgoing
+    POST request and replaces the body with exact parameters — preserving the
+    hCaptcha token. The browser closes automatically.
+  produces: 2 variations per call
+  cost_credits: 20  # 10 per variation
+
+  models:
+    v5:        chirp-crow        # default — best quality
+    v4.5x:     chirp-bluejay
+    v4.5:      chirp-auk
+    "v4.5-all": chirp-v4-5
+    v4:        chirp-v4
+    v3.5:      chirp-v3-5
+    v3:        chirp-v3
+
+# ─────────────────────────────────────────────
+# Security
+# ─────────────────────────────────────────────
+
 security:
-  max_concurrent_sessions: 3
-  session_timeout: 3600000  # 1 hour
-  rate_limit:
-    requests_per_minute: 60
-    burst_limit: 10
+  credential_storage:
+    backend: "OS keyring (Windows Credential Manager / macOS Keychain / libsecret)"
+    large_value_encryption:
+      windows: "DPAPI (win32crypt.CryptProtectData) — encrypted file in %APPDATA%/suno-mcp/"
+      other:   "Fernet AES-128-CBC — key in keyring, file in ~/.config/suno-mcp/"
+  secrets_policy:
+    - Tokens and cookies are never logged or echoed back
+    - Only fingerprints (sha256 prefix) are shown in status output
+    - All credential operations validate the value before storing
+
+# ─────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────
+
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

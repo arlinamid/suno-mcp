@@ -29,6 +29,7 @@ from rich import box
 
 from .tools.api.tools import ApiSunoTools
 from .tools.shared.credentials import get_credential_store
+from .tools.shared.exceptions import AuthenticationError, BrowserError, DownloadError, GenerationError, SunoError
 
 
 def _ensure_utf8() -> None:
@@ -59,7 +60,7 @@ app = typer.Typer(
     help="Suno AI CLI - generate, manage, and download music from the terminal.",
     rich_markup_mode="rich",
     no_args_is_help=True,
-    pretty_exceptions_show_locals=False,
+    pretty_exceptions_enable=False,
 )
 
 console = Console(highlight=False)
@@ -77,8 +78,41 @@ def _t() -> ApiSunoTools:
 
 
 def _run(coro):  # type: ignore[no-untyped-def]
-    """Run a coroutine and return its result."""
-    return asyncio.run(coro)
+    """Run a coroutine, converting known exceptions to clean CLI errors."""
+    try:
+        return asyncio.run(coro)
+    except AuthenticationError as exc:
+        err_console.print(f"[bold red]Auth error:[/bold red] {exc}")
+        err_console.print("[dim]Run [bold]suno login[/bold] to authenticate.[/dim]")
+        raise typer.Exit(1) from None
+    except BrowserError as exc:
+        err_console.print(f"[bold red]Browser error:[/bold red] {exc}")
+        raise typer.Exit(1) from None
+    except GenerationError as exc:
+        err_console.print(f"[bold red]Generation error:[/bold red] {exc}")
+        raise typer.Exit(1) from None
+    except DownloadError as exc:
+        err_console.print(f"[bold red]Download error:[/bold red] {exc}")
+        raise typer.Exit(1) from None
+    except SunoError as exc:
+        # Covers the generic 401 / session-expired case and anything else
+        msg = str(exc)
+        if "401" in msg or "expired" in msg.lower() or "not authenticated" in msg.lower():
+            err_console.print(f"[bold red]Not authenticated:[/bold red] {exc}")
+            err_console.print("[dim]Run [bold]suno login[/bold] to authenticate.[/dim]")
+        else:
+            err_console.print(f"[bold red]Suno error:[/bold red] {exc}")
+        raise typer.Exit(1) from None
+    except KeyboardInterrupt:
+        err_console.print("\n[dim]Cancelled.[/dim]")
+        raise typer.Exit(130) from None
+    except Exception as exc:
+        err_console.print(f"[bold red]Unexpected error:[/bold red] {exc}")
+        err_console.print("[dim]Run with [bold]SUNO_DEBUG=1[/bold] for a full traceback.[/dim]")
+        if "SUNO_DEBUG" in __import__("os").environ:
+            import traceback
+            err_console.print(traceback.format_exc())
+        raise typer.Exit(1) from None
 
 
 def _ok(msg: str) -> None:
@@ -86,7 +120,7 @@ def _ok(msg: str) -> None:
 
 
 def _err(msg: str) -> None:
-    err_console.print(f"ERR  {msg}")
+    err_console.print(f"[bold red]ERR[/bold red]  {msg}")
     raise typer.Exit(1)
 
 
@@ -159,9 +193,12 @@ def save_cookie(
       3. Copy the '__session' value
       4. Run: suno save-cookie "__session=<paste>"
     """
-    store = get_credential_store()
-    result = store.save_cookie(cookie)
-    _ok(result)
+    try:
+        store = get_credential_store()
+        result = store.save_cookie(cookie)
+        _ok(result)
+    except Exception as exc:
+        _err(str(exc))
 
 
 @app.command("save-token")
@@ -176,17 +213,23 @@ def save_token(
       2. Click any authenticated request
       3. Copy the value after 'Authorization: Bearer '
     """
-    store = get_credential_store()
-    result = store.save_token(token)
-    _ok(result)
+    try:
+        store = get_credential_store()
+        result = store.save_token(token)
+        _ok(result)
+    except Exception as exc:
+        _err(str(exc))
 
 
 @app.command("cred-status")
 def cred_status() -> None:
     """Show what credentials are stored (no secrets revealed)."""
-    store = get_credential_store()
-    result = store.status()
-    console.print(Panel(result, title="[bold cyan]Credential Status[/bold cyan]", expand=False))
+    try:
+        store = get_credential_store()
+        result = store.status()
+        console.print(Panel(result, title="[bold cyan]Credential Status[/bold cyan]", expand=False))
+    except Exception as exc:
+        _err(str(exc))
 
 
 @app.command("clear-auth")
@@ -195,9 +238,12 @@ def clear_auth() -> None:
     confirm = typer.confirm("This will delete all saved Suno credentials. Continue?")
     if not confirm:
         raise typer.Abort()
-    store = get_credential_store()
-    result = store.clear()
-    _ok(result)
+    try:
+        store = get_credential_store()
+        result = store.clear()
+        _ok(result)
+    except Exception as exc:
+        _err(str(exc))
 
 
 # ─────────────────────────────────────────────

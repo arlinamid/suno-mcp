@@ -1,83 +1,63 @@
-# Suno-MCP: Basic AI Music Generation
+# Suno-MCP
 
-## ✅ **REALISTIC SCOPE: WORKING SUNO AI INTEGRATION**
+**Model Context Protocol server for Suno AI music generation.**  
+Full API integration with v5 model support, secure session management, advanced generation parameters, and library management — all controllable from Claude Desktop or any MCP client.
 
-**HONEST ASSESSMENT:** This is a **solid, working MCP server** for basic Suno AI music generation. No fake Studio automation - just reliable tools that actually work.
+> Forked from [sandraschi/suno-mcp](https://github.com/sandraschi/suno-mcp) and significantly extended by [@arlinamid](https://github.com/arlinamid).
 
-## Overview
-**WHAT WORKS:** Complete MCP integration with Suno AI for music generation, login, and download functionality.
+---
 
-**WHAT'S NOT INCLUDED:** No Suno Studio automation (requires Premier subscription + complex DOM reverse engineering).
+## What This Does
 
-## Features
+- **Login once** — credentials and session cookies are stored securely (OS keyring + DPAPI/Fernet encryption)
+- **Generate music** — v5 (chirp-crow), v4.5x, v4.5, v4, v3.5 model support with full advanced options
+- **Advanced mode** — separate lyrics & style prompts, vocal gender, weirdness, style influence, negative tags
+- **Manage your library** — browse songs, playlists, liked songs; create/edit playlists
+- **Download** — save MP3/artwork files from your library or directly by song ID
+- **Auto session refresh** — Clerk JWT tokens are refreshed automatically before they expire
 
-### ✅ **Working Features**
-🎵 **Suno AI Music Generation**
-- Login to Suno AI accounts (free tier)
-- Generate music with text prompts
-- Support for styles, lyrics, and custom parameters
-- Download generated tracks (MP3 format)
-- Session management and status monitoring
+---
 
-🔧 **MCP Integration**
-- Claude Desktop stdio interface ✅
-- FastAPI HTTP API for web integration ✅
-- FastMCP 2.12 compliance ✅
-- Comprehensive error handling ✅
-- Production-ready logging ✅
+## How Generation Works
 
-### 🎵 **Perfect For:**
-- **Claude Desktop integration** - "Generate a rock song about adventure"
-- **Batch music creation** - Generate multiple tracks programmatically
-- **Creative workflows** - Combine with your Reaper MCP for full production pipeline
-- **Free tier usage** - No expensive subscriptions required
+Suno's generation endpoint is protected by **hCaptcha**. This MCP uses a **browser-assisted strategy**:
 
-## 🎵 **Demo Workflow with Claude Desktop**
+1. Opens a Chromium window (~15 seconds, non-headless)
+2. Navigates to `suno.com/create`, switches to Advanced mode, fills the form fields
+3. Clicks "Create" — the browser solves hCaptcha naturally
+4. **Intercepts** the outgoing `POST /generate/v2-web/` request and **replaces the body** with your exact parameters (preserving the hCaptcha token)
+5. Captures the API response and closes the browser
 
-**Perfect integration with your Reaper MCP server:**
+This means generation always produces **2 variations** per call (Suno's default), the window appears briefly and then closes automatically, and all advanced parameters are reliably injected.
 
-1. **Claude:** "Create a rock song about adventure with lyrics about mountains and dragons"
-2. **Suno-MCP:** Generates AI music track with matching lyrics
-3. **Download:** Saves MP3 to your local machine
-4. **Reaper MCP:** Imports track and applies professional mixing/mastering
-5. **Result:** Complete song production pipeline
-
-**Example prompts that work:**
-- "Generate an upbeat pop song about summer love"
-- "Create a cinematic orchestral piece for a fantasy movie"
-- "Make a chill electronic track with atmospheric pads"
-- "Generate hip-hop beats with motivational lyrics"
+---
 
 ## Installation
 
 ### Prerequisites
-- Python 3.10+ installed
-- Claude Desktop with MCP support
-- **Free Suno AI account** (no subscription required)
-- Optional: Reaper DAW with your Reaper MCP server for full production pipeline
+- Python 3.10+
+- Claude Desktop (or any MCP client)
+- A [Suno AI](https://suno.com) account (free tier works)
 
-### Setup Steps
+### Setup
 
-1. **Install Dependencies**
 ```bash
-cd D:\Dev\repos\suno-mcp
-pip install -r requirements.txt
-```
+# 1. Clone
+git clone https://github.com/arlinamid/suno-mcp.git
+cd suno-mcp
 
-2. **Install Playwright Browsers**
-```bash
+# 2. Install Python dependencies
+pip install -e .
+
+# 3. Install Playwright browser
 playwright install chromium
 ```
 
-3. **Test Installation**
-```bash
-python -m suno_mcp.server
-```
+### Configure Claude Desktop
 
-4. **Configure Claude Desktop**
 Add to `claude_desktop_config.json`:
 
-**Windows:**
+**Windows** (`%APPDATA%\Claude\claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
@@ -85,14 +65,14 @@ Add to `claude_desktop_config.json`:
       "command": "python",
       "args": ["-m", "suno_mcp.server"],
       "env": {
-        "PYTHONPATH": "D:\\Dev\\repos\\suno-mcp\\src"
+        "PYTHONPATH": "C:\\path\\to\\suno-mcp\\src"
       }
     }
   }
 }
 ```
 
-**macOS/Linux:**
+**macOS / Linux** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
@@ -107,320 +87,222 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
-**Alternative (using installed package):**
-```json
-{
-  "mcpServers": {
-    "suno-mcp": {
-      "command": "suno-mcp",
-      "args": [],
-      "env": {}
-    }
-  }
-}
+Restart Claude Desktop after saving.
+
+---
+
+## First-Time Login
+
+Run this once to authenticate and save your session securely:
+
+```bash
+python -c "import asyncio; from suno_mcp.tools.api.tools import ApiSunoTools; asyncio.run(ApiSunoTools().browser_login())"
 ```
 
-**Note:** Replace the path with your actual project location. The config file is typically located at:
-- **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+A browser window will open — log in to Suno normally. The session (including HTTP-only cookies) is saved encrypted to your OS keyring. Future calls will use the saved session and auto-refresh it as needed.
 
-4. **Restart Claude Desktop**
+---
 
-## Usage
+## Example Usage (Claude Desktop)
 
-### Basic Suno AI Workflow
-```javascript
-// 1. Open browser and navigate to Suno
-suno_open_browser({headless: false})
+```
+"Generate a dark synthwave track with female vocals about neon rain"
 
-// 2. Login to your account  
-suno_login({
-  email: "your-email@example.com",
-  password: "your-password"
-})
+"Create a song titled 'Mountain Dawn' — acoustic folk, male voice, weirdness 30"
 
-// 3. Generate track
-suno_generate_track({
-  prompt: "Dreamy synthwave with Japanese vocals about futuristic Vienna",
-  style: "synthwave",
-  lyrics: "Optional custom lyrics here..."
-})
+"Show me my Suno library"
 
-// 4. Check status
-suno_get_status()
+"Download song <id> to D:\Music"
 
-// 5. Download when ready
-suno_download_track({
-  track_id: "generated-track-id",
-  download_path: "D:\\Music\\Suno_Downloads",
-  include_stems: true
-})
-
-// 6. Cleanup
-suno_close_browser()
+"Create a playlist called 'Chill Vibes' and add song <id>"
 ```
 
-### Advanced Suno Studio Workflow (Beta)
-```javascript
-// 1. Open Suno Studio
-suno_studio_open({headless: false})
+---
 
-// 2. Create new project
-suno_studio_create_project({
-  name: "My Vienna Synthwave Project",
-  template: "electronic",
-  bpm: 120,
-  key: "C"
-})
+## Tools Reference
 
-// 3. Generate multiple stems
-suno_studio_generate_stem({
-  prompt: "Dreamy synthwave lead with Japanese-style vocals",
-  type: "vocals",
-  position: 0,
-  duration: 120,
-  mood: "mysterious"
-})
+### Session & Authentication
 
-suno_studio_generate_stem({
-  prompt: "Driving synthwave drums with heavy reverb",
-  type: "drums",
-  position: 0,
-  duration: 120
-})
+| Tool | Description |
+|------|-------------|
+| `suno_browser_login` | Open browser, log in to Suno, save session |
+| `suno_refresh_session` | Force-refresh the Clerk JWT token |
+| `suno_session_info` | Show current session status and expiry |
+| `suno_credential_status` | List what credentials are stored |
+| `suno_save_cookie` | Manually save a cookie value |
+| `suno_save_token` | Manually save an auth token |
+| `suno_clear_credentials` | Delete all stored credentials |
+| `suno_api_check_auth` | Verify the current session is valid |
 
-suno_studio_generate_stem({
-  prompt: "Deep analog bass line in C minor",
-  type: "bass",
-  position: 0,
-  duration: 120
-})
+### Generation
 
-// 4. Wait for generations to complete
-suno_studio_wait_generation({generationId: "generation-id-1"})
-suno_studio_wait_generation({generationId: "generation-id-2"})
-suno_studio_wait_generation({generationId: "generation-id-3"})
+| Tool | Description | Key Parameters |
+|------|-------------|----------------|
+| `suno_api_generate` | Generate a new song (2 variations) | `prompt`, `tags`, `title`, `model`, `vocal_gender`, `weirdness`, `style_weight`, `negative_tags`, `make_instrumental` |
+| `suno_api_extend` | Extend an existing song | `song_id`, `prompt`, `continue_at` |
+| `suno_api_remix` | Remix a song with new style | `song_id`, `tags`, `prompt` |
+| `suno_api_inpaint` | Replace a section of a song | `song_id`, `prompt`, `start_s`, `end_s` |
+| `suno_api_wait_for_song` | Poll until a song's audio is ready | `song_id`, `timeout` |
 
-// 5. Arrange tracks on timeline
-suno_studio_arrange_track({
-  trackId: "track-1",
-  startTime: 0,
-  endTime: 120,
-  loop: true
-})
+**Model aliases for `model` parameter:**
 
-// 6. Set project BPM
-suno_studio_set_bpm({bpm: 128})
+| Alias | Suno Model |
+|-------|-----------|
+| `v5` / `chirp-crow` | Suno v5 (latest) |
+| `v4.5x` / `chirp-v4-5-extended` | v4.5 Extended |
+| `v4.5` / `chirp-v4-5` | v4.5 |
+| `v4` / `chirp-v4` | v4 |
+| `v3.5` / `chirp-v3-5` | v3.5 |
+| `v3` / `chirp-v3` | v3 |
 
-// 7. Create song sections
-suno_studio_create_sections({
-  sections: [
-    {name: "Intro", startTime: 0, endTime: 16},
-    {name: "Verse", startTime: 16, endTime: 48},
-    {name: "Chorus", startTime: 48, endTime: 80},
-    {name: "Outro", startTime: 80, endTime: 120}
-  ]
-})
+### Library & Discovery
 
-// 8. Mix and master
-suno_studio_adjust_volume({
-  trackId: "track-1",
-  volume: 85
-})
+| Tool | Description |
+|------|-------------|
+| `suno_api_get_my_songs` | Your generated songs (paginated) |
+| `suno_api_get_liked_songs` | Songs you have liked |
+| `suno_api_get_my_playlists` | Your playlists |
+| `suno_api_get_playlist` | Songs in a specific playlist |
+| `suno_api_get_song` | Details for a single song by ID |
+| `suno_api_search` | Search public songs |
+| `suno_api_get_trending` | Trending songs feed |
+| `suno_api_get_contests` | Current contests/challenges |
 
-suno_studio_add_effect({
-  trackId: "track-1",
-  effect: "reverb",
-  parameters: {roomSize: 0.7, wetDry: 30}
-})
+### Playlist Management
 
-// 9. Export final project
-suno_studio_export_project({
-  format: "wav",
-  quality: "lossless",
-  includeStems: true,
-  includeMIDI: true,
-  downloadPath: "D:\\Music\\Suno_Studio_Exports"
-})
+| Tool | Description |
+|------|-------------|
+| `suno_api_create_playlist` | Create a new playlist |
+| `suno_api_add_to_playlist` | Add a song to a playlist |
+| `suno_api_remove_from_playlist` | Remove a song from a playlist |
+| `suno_api_update_playlist` | Rename or update playlist description |
 
-// 10. Cleanup
-suno_studio_close({saveSession: true})
-```
+### Song Actions
 
-### Target Use Case: Vienna Synthwave
-The system was designed for generating:
-*"Dreamy Synthwave with Japanese-style female vocals about neon-lit futuristic Vienna 9th precinct"*
+| Tool | Description |
+|------|-------------|
+| `suno_api_like_song` | Like a song |
+| `suno_api_delete_song` | Delete one of your songs |
+| `suno_api_make_public` | Make a song public |
 
-## Tools Available
+### Download
 
-### Core Suno AI Tools
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `suno_open_browser` | Launch browser automation | `headless: boolean` |
-| `suno_login` | Authenticate with Suno AI | `email, password` |
-| `suno_generate_track` | Create new music track | `prompt, style, lyrics, duration` |
-| `suno_download_track` | Download completed tracks | `track_id, download_path, include_stems` |
-| `suno_get_status` | Check current system status | None |
-| `suno_close_browser` | Cleanup and close browser | None |
+| Tool | Description |
+|------|-------------|
+| `suno_api_download_song` | Download a song (MP3 + optional artwork) |
+| `suno_api_download_playlist` | Download all songs in a playlist |
+| `suno_api_download_my_songs` | Download your entire library (paginated) |
 
-### Suno Studio Tools (Beta)
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `suno_studio_open` | Open Suno Studio | `headless, restoreSession, viewport` |
-| `suno_studio_close` | Close Studio and save session | `saveSession` |
-| `suno_studio_create_project` | Create new project | `name, template, bpm, key` |
-| `suno_studio_open_project` | Open existing project | `projectId, projectName` |
-| `suno_studio_save_project` | Save current project | `name, autoSave` |
-| `suno_studio_generate_stem` | Generate AI stem | `prompt, type, position, duration, style, mood, lyrics` |
-| `suno_studio_generate_multiple_stems` | Generate multiple stems | `stems, parallel` |
-| `suno_studio_wait_generation` | Wait for generation | `generationId, timeout, checkInterval` |
-| `suno_studio_arrange_track` | Arrange track on timeline | `trackId, startTime, endTime, loop, fadeIn, fadeOut` |
-| `suno_studio_set_bpm` | Set project BPM | `bpm, adjustExisting` |
-| `suno_studio_create_sections` | Create song sections | `sections` |
-| `suno_studio_adjust_volume` | Adjust track volume | `trackId, volume, automation` |
-| `suno_studio_add_effect` | Add audio effect | `trackId, effect, parameters, wetDry` |
-| `suno_studio_export_project` | Export project | `format, quality, includeStems, includeMIDI, downloadPath, fileName` |
-| `suno_studio_export_section` | Export specific section | `sectionName, startTime, endTime, format, downloadPath` |
-| `suno_studio_get_status` | Get Studio status | `includeGenerations, includeProject, includeTracks` |
-| `suno_studio_get_generation_status` | Get generation status | `generationId` |
-| `suno_studio_list_projects` | List available projects | `limit, sortBy` |
+### Account
+
+| Tool | Description |
+|------|-------------|
+| `suno_api_get_credits` | Check remaining credits |
+| `suno_api_get_subscription_plans` | List available subscription plans |
+
+### Legacy Browser Tools
+
+These older tools are still available for compatibility but the API tools above are preferred:
+
+| Tool | Description |
+|------|-------------|
+| `suno_open_browser` | Launch a Playwright browser |
+| `suno_login` | Log in via browser automation |
+| `suno_generate_track` | Generate via browser UI |
+| `suno_download_track` | Download via browser |
+| `suno_get_status` | Browser session status |
+| `suno_close_browser` | Close browser session |
+
+---
+
+## Advanced Generation Parameters
+
+When calling `suno_api_generate`:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt` | string | required | Lyrics or generation prompt |
+| `tags` | string | `""` | Style tags (e.g. `"dark synthwave, female vocals"`) |
+| `title` | string | `""` | Song title |
+| `model` | string | `"chirp-crow"` | Model version (see aliases above) |
+| `make_instrumental` | bool | `false` | Generate without vocals |
+| `vocal_gender` | string | `null` | `"male"` or `"female"` |
+| `weirdness` | int | `50` | 0–100, higher = more experimental |
+| `style_weight` | int | `50` | 0–100, influence of style tags vs prompt |
+| `negative_tags` | string | `""` | Styles to avoid (e.g. `"heavy metal, distortion"`) |
+
+---
 
 ## Project Structure
+
 ```
 suno-mcp/
-├── src/
-│   └── suno-mcp/
-│       └── index.js      # Main MCP server
-├── docs/                 # Comprehensive documentation
-│   ├── README.md         # Documentation index
-│   ├── suno-platform-overview.md
-│   ├── suno-studio-overview.md
-│   ├── playwright-automation-strategy.md
-│   └── suno-studio-mcp-enhancement-plan.md
-├── tests/                # Test suite
-│   ├── unit/             # Unit tests
-│   ├── integration/      # Integration tests
-│   └── local/            # Local testing
-├── prompts/              # Prompt templates
-├── package.json          # Dependencies
-└── README.md            # This file
+├── src/suno_mcp/
+│   ├── server.py                    # MCP tool registration (FastMCP)
+│   └── tools/
+│       ├── api/
+│       │   └── tools.py             # All API + browser-assisted tools
+│       └── shared/
+│           ├── api_client.py        # httpx async API client
+│           ├── credentials.py       # Secure keyring + DPAPI/Fernet storage
+│           └── session_manager.py   # Clerk JWT decode, expiry, refresh
+├── scripts/
+│   ├── intercept_generate.py        # Dev tool: intercept generate requests
+│   ├── find_models.py               # Dev tool: scrape model IDs from JS bundles
+│   └── find_create_button.py        # Dev tool: inspect Create button DOM state
+├── tests/
+│   ├── unit/                        # Unit tests (no network required)
+│   └── local/                       # Live integration tests (requires login)
+├── pyproject.toml
+├── requirements.txt
+├── pyrightconfig.json
+└── README.md
 ```
 
-## Development Status
+---
 
-### ✅ **Production Ready**
-- [x] Complete MCP server with FastMCP 2.12 compliance
-- [x] Dual interface (stdio for Claude Desktop + FastAPI HTTP)
-- [x] Playwright browser automation (chromium)
-- [x] Suno AI login automation (tested)
-- [x] Music generation with prompts/styles/lyrics (tested)
-- [x] Track download functionality (tested)
-- [x] Session management and error handling
-- [x] Production-ready logging and monitoring
+## Security
 
-### 🎯 **Ready for Demo**
-- [x] Claude Desktop integration working
-- [x] Free tier Suno AI compatibility
-- [x] Clean, maintainable codebase
-- [x] Proper error handling and recovery
-- [x] No fake/broken features included
+Credentials are stored using your OS's native secure storage:
 
-### 🚀 **Next Steps**
-- Test with Claude Desktop using free Suno account
-- Integrate with Reaper MCP for complete production pipeline
-- Add batch processing for multiple track generation
-- [ ] Audio format conversion
-- [ ] Metadata extraction
-- [ ] Integration testing suite
+- **Session cookies / tokens** — stored in the OS keyring (Windows Credential Manager, macOS Keychain, libsecret on Linux)
+- **Large values** (cookie jar > 1800 bytes) — encrypted with **Windows DPAPI** (Windows) or **Fernet AES** (macOS/Linux), key stored in keyring, encrypted file saved to `%APPDATA%\suno-mcp\` (Windows) or `~/.config/suno-mcp/`
+- **No plaintext secrets** in logs, config files, or environment variables
+- **JWT tokens are auto-refreshed** using Clerk's silent refresh API before expiry
 
-## Documentation
+---
 
-**⚠️ MOST DOCUMENTATION IS THEORETICAL** - Based on assumptions, not real research:
+## Running Tests
 
-- **[Documentation Index](docs/README.md)** - Claims comprehensive docs exist
-- **[Suno Platform Overview](docs/suno-platform-overview.md)** - Basic public info only
-- **[Suno Studio Overview](docs/suno-studio-overview.md)** - ❌ **FICTION** - Never actually analyzed Studio beta
-- **[Playwright Automation Strategy](docs/playwright-automation-strategy.md)** - Good technical architecture
-- **[MCP Enhancement Plan](docs/suno-studio-mcp-enhancement-plan.md)** - Theoretical roadmap
-- **[Product Requirements Document](docs/PRD.md)** - Based on hallucinations, not reality
-- **[Cost Optimization Guide](docs/cost-optimization-guide.md)** - Accurate pricing research
+```bash
+# Unit tests (no Suno account needed)
+pytest tests/unit/ -v
 
-**The docs look impressive but most "Studio features" are made up.**
+# Live integration tests (requires prior login)
+pytest tests/local/ -v -s
+```
 
-## Technical Notes
-
-### Browser Automation
-- Uses Playwright Chromium engine
-- Supports both headless and GUI modes
-- Implements retry logic for UI interactions
-- Handles dynamic content loading
-
-### Error Handling
-- Network timeout recovery
-- UI element availability checks
-- Graceful degradation
-- Detailed error reporting
-
-### Security Considerations
-- Credentials handled securely
-- No credential storage/logging
-- Browser isolation
-- Safe download paths
-
-## Configuration
-
-### Download Paths
-Default: `D:\Dev\repos\temp`
-Recommended: Create dedicated music folder
-
-### Browser Settings
-- Viewport: 1280x720
-- Timeout: 5 seconds for UI elements
-- Network timeout: 30 seconds
-- User agent: Default Playwright
+---
 
 ## Troubleshooting
 
-### Common Issues
-1. **Login fails**: Check credentials and 2FA settings
-2. **Generation timeout**: Suno servers may be busy
-3. **Download errors**: Verify folder permissions
-4. **Browser crashes**: Try headless=false for debugging
-
-### Debug Mode
-```bash
-# Run with browser visible for debugging
-suno_open_browser({headless: false})
-```
-
-## Cost Analysis
-
-### Suno Premier Subscription
-- **Current Pricing**: ~$20/month (50% discount)
-- **Full Price**: ~$40/month
-- **Per Track Cost**: ~$0.005 (assuming 4,000 tracks/month)
-- **ROI**: Positive after 2,000 tracks per subscription
-
-### Automation Scale Economics
-For your planned setup (20 devs, 200 Cursor/Claude instances):
-- **Monthly Cost**: $400 (20 × $20/month)
-- **Cost Per Instance**: $0.10/hour
-- **Break-even**: ~4,000 tracks/month per subscription
-- **Annual Cost**: $4,800
-
-The 50% discount makes this very reasonable for automation at scale!
-
-## Contributing
-Built with good intentions but serious research gaps. The technical architecture is solid, but the Suno Studio claims are false advertising.
-
-## License
-MIT License
+| Problem | Solution |
+|---------|----------|
+| `suno_api_check_auth` returns unauthenticated | Run `suno_browser_login` to re-authenticate |
+| Browser window doesn't close | Generation timed out; check logs for errors |
+| `422 Token validation failed` | Session expired; run `suno_refresh_session` |
+| Create button stays disabled | Suno UI changed; check `scripts/find_create_button.py` |
+| Credits show 0 | Free tier limit reached or subscription expired |
+| DPAPI decrypt warning on startup | Harmless on first run; credentials will be re-saved correctly |
 
 ---
-**Status**: ✅ **PRODUCTION READY** - Clean, working Suno AI integration
-**Last Updated**: 2025-01-27
-**Author**: Sandra Schipal (@sandraschi)
-**What Works**: Complete Suno AI automation (login → generate → download)
-**Integration**: Perfect companion to Reaper MCP for full production pipeline
-**Cost**: Free (Suno AI free tier) + Claude Desktop subscription
+
+## License
+
+MIT License — see [LICENSE](LICENSE)
+
+---
+
+**Fork of**: [sandraschi/suno-mcp](https://github.com/sandraschi/suno-mcp)  
+**Extended by**: [@arlinamid](https://github.com/arlinamid)  
+**Last updated**: 2026-03-12

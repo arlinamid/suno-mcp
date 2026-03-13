@@ -1,104 +1,117 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project are documented here.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+---
 
-## [1.0.0] - 2025-01-27
+## [Unreleased] — arlinamid fork
+
+> Base: [sandraschi/suno-mcp](https://github.com/sandraschi/suno-mcp) @ `0402a9f`
+
+---
+
+## [2.0.0] — 2026-03-12
+
+Complete rewrite of the generation engine and a major feature expansion on top of the original browser-automation-only implementation.
 
 ### Added
-- **Complete MCP Architecture**: Dual interface support (MCP + FastAPI)
-- **24 MCP Tools**: 6 basic Suno AI tools + 18 Suno Studio beta tools
-- **FastAPI Endpoints**:
-  - `/health` - Health check endpoint
-  - `/api/docs` - OpenAPI documentation
-  - `/api/v1/tools` - Tool listing
-  - `/api/v1/status` - Server status
-  - `/api/v1/tools/:name` - Tool execution
-- **Browser Automation**: Playwright-powered Suno AI interaction
-- **Comprehensive Documentation**: Complete technical documentation suite
-- **Testing Framework**: Jest unit tests + PowerShell local tests
-- **Production Checklist**: MCP server production readiness audit
 
-### Features
-- **Basic Suno AI Integration**:
-  - Browser automation for Suno AI platform
-  - Automated login and authentication
-  - Track generation from text prompts
-  - Download management with stems support
-  - Real-time status monitoring
+#### Generation
+- **Browser-assisted generation with hCaptcha bypass** (`suno_api_generate`)  
+  Opens a non-headless Chromium window, fills the Advanced mode form, clicks "Create" so the browser solves hCaptcha naturally, then intercepts the outgoing `POST /generate/v2-web/` request and replaces the body with exact parameters — preserving the hCaptcha token. Browser closes automatically after ~15 s.
+- **v5 model support** — `chirp-crow` and aliases `v5`, `v4.5x`, `v4.5`, `v4`, `v3.5`, `v3`
+- **Advanced generation parameters**: `vocal_gender` (male/female), `weirdness` (0–100), `style_weight` (0–100), `negative_tags`
+- **Exact DOM selectors** for all Advanced mode fields (lyrics textarea, style textarea, gender buttons, weirdness slider, style influence slider, title input) with primary + fallback selector logic
+- **Extend, remix, inpaint** tools (`suno_api_extend`, `suno_api_remix`, `suno_api_inpaint`)
+- `suno_api_wait_for_song` — polls until audio URL is ready
 
-- **Suno Studio Beta Support**:
-  - Project management (create, open, save)
-  - AI stem generation (vocals, drums, bass, synths)
-  - Timeline manipulation and arrangement
-  - BPM and tempo control
-  - Volume adjustment and effects
-  - Advanced export capabilities
-  - Real-time generation monitoring
+#### API Client (`tools/shared/api_client.py`)
+- Full async `httpx` client for `studio-api.prod.suno.com`
+- Endpoints: credits, billing, subscription plans, feed, search, playlists, liked songs, contests
+- Automatic `Authorization: Bearer <token>` and `browser-token` header injection
+- Streaming file downloads with progress (MP3 + artwork)
 
-- **Developer Experience**:
-  - Dual interface (stdio MCP + HTTP FastAPI)
-  - Comprehensive error handling
-  - Session persistence
-  - Cross-platform support (Windows/macOS/Linux)
-  - Claude Desktop integration
+#### Session Management (`tools/shared/session_manager.py`)
+- JWT decode and expiry checking (no external library needed)
+- Silent Clerk JWT refresh via `https://clerk.suno.com/v1/client/sessions/{sid}/tokens`
+- Auto-refresh triggered before token expiry on every API call
+- `suno_refresh_session`, `suno_session_info` MCP tools
 
-### Technical
-- **Dependencies**: Added FastAPI, Playwright, Jest testing
-- **Architecture**: Modular dual-interface server
-- **Testing**: Unit tests, integration tests, local PowerShell tests
-- **Documentation**: PRD, technical specs, API docs
-- **CI/CD Ready**: GitHub Actions workflows prepared
+#### Secure Credential Storage (`tools/shared/credentials.py`)
+- OS keyring integration via `keyring` library (Windows Credential Manager / macOS Keychain / libsecret)
+- **Large-value encryption** for values > 1800 bytes (full cookie jar exceeds Windows Credential Manager limit):
+  - **Windows**: DPAPI (`win32crypt.CryptProtectData`) — encrypted file in `%APPDATA%\suno-mcp\`
+  - **macOS / Linux**: Fernet AES-128-CBC (`cryptography` library) — key in keyring, file in `~/.config/suno-mcp/`
+- `suno_credential_status`, `suno_save_cookie`, `suno_save_token`, `suno_clear_credentials` MCP tools
 
-### Known Issues
-- Suno Studio tools are placeholder implementations
-- Requires Suno Premier subscription for full functionality
-- Some advanced features need real Playwright automation
+#### Library & Discovery
+- `suno_api_get_my_songs` — paginated personal library
+- `suno_api_get_liked_songs` — liked songs feed
+- `suno_api_get_my_playlists` — personal playlists
+- `suno_api_get_playlist` — songs in a playlist
+- `suno_api_get_song` — single song details
+- `suno_api_search` — public song search
+- `suno_api_get_trending` — trending feed with period filter
+- `suno_api_get_contests` — active contests
 
----
+#### Playlist Management
+- `suno_api_create_playlist`
+- `suno_api_add_to_playlist`
+- `suno_api_remove_from_playlist`
+- `suno_api_update_playlist`
 
-## Development Status
+#### Downloads
+- `suno_api_download_song` — MP3 + optional artwork by song ID
+- `suno_api_download_playlist` — full playlist download
+- `suno_api_download_my_songs` — bulk download personal library
 
-### ✅ Completed (Phase 1)
-- [x] MCP server architecture with dual interfaces
-- [x] 24 tool definitions with proper schemas
-- [x] FastAPI endpoints with OpenAPI support
-- [x] Basic browser automation framework
-- [x] Testing infrastructure (Jest + PowerShell)
-- [x] Comprehensive documentation
-- [x] Production checklist compliance
+#### Song Actions
+- `suno_api_like_song`, `suno_api_delete_song`, `suno_api_make_public`
 
-### 🔄 In Progress (Phase 2)
-- [ ] Suno Studio Playwright automation implementation
-- [ ] Real tool functionality (vs placeholder responses)
-- [ ] Enhanced error handling and recovery
-- [ ] Session persistence and management
-- [ ] Advanced testing and validation
+#### Tests
+- Full unit test suite (`tests/unit/`) — no network required, all external calls mocked
+  - `test_api_client.py`, `test_api_tools.py`, `test_credentials.py`, `test_server_tools.py`, `test_session_manager.py`
+- Live integration tests (`tests/local/test_live_api.py`) — runs against real Suno API
+- `pytest-asyncio` configured with `asyncio_default_test_loop_scope = "module"` to prevent event loop issues
 
-### 📋 Planned (Phase 3-6)
-- [ ] Full Suno Studio beta integration
-- [ ] Timeline manipulation tools
-- [ ] Advanced mixing and effects
-- [ ] Batch processing workflows
-- [ ] Performance optimization
-- [ ] Production deployment
+#### Developer Scripts
+- `scripts/intercept_generate.py` — Playwright script to capture full `generate/v2-web` request/response for reverse engineering
+- `scripts/find_models.py` — scrapes Suno's JS bundles for model identifiers
+- `scripts/find_create_button.py` — dumps Create button DOM state and takes screenshot
 
----
+#### Tooling
+- `pyrightconfig.json` — basedpyright strict type checking configuration
+- Updated `pyproject.toml` with test config and new dependencies
 
-## Contributing
+### Changed
+- `server.py` — registered all 37 new MCP tools; updated `suno_api_generate` docstring to accurately describe browser-assisted mechanism (not direct API)
+- `requirements.txt` — added `httpx`, `keyring`, `cryptography`, `pywin32`, `pytest`, `pytest-asyncio`, `basedpyright`
+- `pyproject.toml` — version bumped, keywords updated, test configuration added
 
-This project follows semantic versioning. For changes that affect the public API or tool interfaces, please update the version accordingly.
-
-### Types of Changes
-- **Added** for new features
-- **Changed** for changes in existing functionality
-- **Deprecated** for soon-to-be removed features
-- **Removed** for now removed features
-- **Fixed** for any bug fixes
-- **Security** in case of vulnerabilities
+### Fixed
+- `OSError: [WinError 1783] The stub received bad data` — Windows Credential Manager byte limit exceeded by cookie jar; fixed with DPAPI file-based encryption
+- `DPAPI decrypt failed` warning on startup — fixed by detecting Fernet-encrypted data (`gA` prefix) before attempting DPAPI decryption
+- `422 Token validation failed` — resolved by using browser-assisted route-intercept strategy instead of direct API calls (hCaptcha requirement)
+- `AttributeError: 'list' object has no attribute 'get'` in `get_my_songs` — API returns list or dict depending on context; both handled
+- `API error 404` for liked songs — correct endpoint is `/feed/?filter=liked`, not `/feed/liked/`
+- `RuntimeError: Event loop is closed` in async tests — fixed with module-scoped pytest-asyncio event loop
+- `SyntaxError: Failed to execute querySelector` — replaced JS `:has-text()` (Playwright-only) with native `page.locator()`
 
 ---
 
-*This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.*
+## [1.0.0] — 2025-01-27 (sandraschi/suno-mcp)
+
+Original implementation by [@sandraschi](https://github.com/sandraschi).
+
+### Included
+- Basic MCP server with FastMCP 2.12
+- Playwright browser automation for Suno login, generation, download
+- Dual interface: stdio (Claude Desktop) + FastAPI HTTP
+- Tools: `suno_open_browser`, `suno_login`, `suno_generate_track`, `suno_download_track`, `suno_get_status`, `suno_close_browser`
+- Cursor rulebook and documentation
+
+---
+
+[Unreleased]: https://github.com/arlinamid/suno-mcp/compare/v1.0.0...HEAD  
+[2.0.0]: https://github.com/arlinamid/suno-mcp/releases/tag/v2.0.0  
+[1.0.0]: https://github.com/sandraschi/suno-mcp/releases/tag/v1.0.0

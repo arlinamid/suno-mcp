@@ -1,9 +1,34 @@
+<div align="center">
+
+<img src="assets/banner.png" alt="Suno MCP Banner" width="100%"/>
+
 # Suno-MCP
 
 **Model Context Protocol server for Suno AI music generation.**  
 Full API integration with v5 model support, secure session management, advanced generation parameters, library management, reusable prompt workflows, and live contextual resources — all controllable from Claude Desktop, Cursor, or any MCP client.
 
+---
+
+<!-- Badges -->
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Version](https://img.shields.io/badge/version-2.2.1-blue?style=flat-square)](CHANGELOG.md)
+[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-FastMCP%202.x-blueviolet?style=flat-square)](https://github.com/jlowin/fastmcp)
+[![Suno](https://img.shields.io/badge/Suno-v5%20%7C%20v4.5%20%7C%20v4-ff69b4?style=flat-square)](https://suno.com)
+
+[![Works with Claude](https://img.shields.io/badge/Works%20with-Claude%20Desktop-orange?style=flat-square&logo=anthropic&logoColor=white)](https://claude.ai/download)
+[![Works with Cursor](https://img.shields.io/badge/Works%20with-Cursor-1a1a2e?style=flat-square&logo=cursor&logoColor=white)](https://cursor.sh)
+[![Works with Gemini CLI](https://img.shields.io/badge/Works%20with-Gemini%20CLI-4285F4?style=flat-square&logo=google&logoColor=white)](https://github.com/google-gemini/gemini-cli)
+[![Works with Cline](https://img.shields.io/badge/Works%20with-Cline-6e40c9?style=flat-square)](https://github.com/cline/cline)
+
+[![GitHub Stars](https://img.shields.io/github/stars/arlinamid/suno-mcp?style=flat-square&logo=github)](https://github.com/arlinamid/suno-mcp/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/arlinamid/suno-mcp?style=flat-square&logo=github)](https://github.com/arlinamid/suno-mcp/network/members)
+[![GitHub Issues](https://img.shields.io/github/issues/arlinamid/suno-mcp?style=flat-square&logo=github)](https://github.com/arlinamid/suno-mcp/issues)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square)](README.md)
+
 > Forked from [sandraschi/suno-mcp](https://github.com/sandraschi/suno-mcp) and significantly extended by [@arlinamid](https://github.com/arlinamid).
+
+</div>
 
 ---
 

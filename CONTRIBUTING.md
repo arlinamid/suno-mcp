@@ -35,6 +35,7 @@ pytest tests/unit/ -v
 suno-mcp/
 ├── src/suno_mcp/
 │   ├── server.py                    # All MCP tool / prompt / resource registration
+│   ├── cli.py                       # `suno` CLI entry-point (Typer + Rich)
 │   └── tools/
 │       ├── api/
 │       │   └── tools.py             # ApiSunoTools — all API + browser-assisted tools
@@ -52,6 +53,42 @@ suno-mcp/
 ├── pyrightconfig.json
 └── requirements.txt
 ```
+
+---
+
+## CLI Development
+
+The `suno` CLI lives in `src/suno_mcp/cli.py` and is built with [Typer](https://typer.tiangolo.com/) + [Rich](https://rich.readthedocs.io/).
+
+### Running without installing
+
+```bash
+# PowerShell
+$env:PYTHONPATH="src"; python -m suno_mcp.cli --help
+$env:PYTHONPATH="src"; python -m suno_mcp.cli status
+```
+
+### Adding a new CLI command
+
+Each command is a regular Typer function decorated with `@app.command()`. It calls `_run(coro)` to execute async `ApiSunoTools` methods synchronously:
+
+```python
+@app.command()
+def my_command(
+    song_id: Annotated[str, typer.Argument(help="Song UUID")],
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+) -> None:
+    """One-line description shown in --help."""
+    result = _run(_t().some_api_method(song_id=song_id))
+    console.print(result)
+```
+
+Guidelines:
+- Keep all strings ASCII-safe (Windows cp1250 default codepage; UTF-8 is forced at startup via `SetConsoleOutputCP(65001)` but write defensively)
+- Use `_ok(msg)` for simple success confirmations, `_err(msg)` for fatal errors
+- Wrap long operations in a `Progress(SpinnerColumn(), ...)` context for visual feedback
+- Add the command to the `info` table rows list for the quick-reference view
+- Update `CHANGELOG.md` under `[Unreleased]`
 
 ---
 

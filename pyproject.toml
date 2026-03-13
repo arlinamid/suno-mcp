@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "suno-mcp"
-version = "2.1.0"
+version = "2.2.0"
 description = "MCP Server for automated Suno AI music generation"
 readme = "README.md"
 license = {text = "MIT"}
@@ -35,6 +35,8 @@ dependencies = [
     "httpx>=0.27.0",
     "keyring>=24.0.0",
     "uvloop>=0.17.0; sys_platform != 'win32'",
+    "typer>=0.12.0",
+    "rich>=13.0.0",
 ]
 
 [project.optional-dependencies]
@@ -53,15 +55,15 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/sandra/suno-mcp"
-Documentation = "https://suno-mcp.readthedocs.io/"
-Repository = "https://github.com/sandra/suno-mcp.git"
-Issues = "https://github.com/sandra/suno-mcp/issues"
-Changelog = "https://github.com/sandra/suno-mcp/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/arlinamid/suno-mcp"
+Repository = "https://github.com/arlinamid/suno-mcp.git"
+Issues = "https://github.com/arlinamid/suno-mcp/issues"
+Changelog = "https://github.com/arlinamid/suno-mcp/blob/main/CHANGELOG.md"
 
 [project.scripts]
 suno-mcp = "suno_mcp.server:main"
 suno-mcp-api = "suno_mcp.server:main_api"
+suno = "suno_mcp.cli:main"
 
 [tool.setuptools]
 zip-safe = false

@@ -10,6 +10,45 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.2.0] — 2026-03-13
+
+Feature release adding a full-featured terminal CLI (`suno` command).
+
+### Added
+
+#### CLI (`src/suno_mcp/cli.py`)
+A new `suno` command installed as a script entry-point (`pip install -e .`):
+
+| Command group | Commands |
+|---|---|
+| **Auth** | `login`, `status`, `refresh`, `clear-auth` |
+| **Generate** | `generate`, `wait`, `extend`, `remix`, `lyrics` |
+| **Library** | `songs`, `song`, `trending`, `search`, `liked` |
+| **Playlists** | `playlists`, `playlist`, `playlist-create`, `playlist-add`, `playlist-remove` |
+| **Download** | `download`, `download-playlist`, `download-library` |
+| **Song actions** | `like`, `publish`, `delete` |
+| **Account** | `credits`, `contests`, `plans` |
+| **Advanced** | `stems`, `concat` |
+| **Help** | `info` (full reference table) |
+
+Key features:
+- Built on [Typer](https://typer.tiangolo.com/) with [Rich](https://rich.readthedocs.io/) output
+- `--wait` and `--download DIR` flags on `generate` for one-shot generation + download
+- `--json` flag on `songs` and `song` for machine-readable output
+- Spinner progress indicators for long operations
+- Windows UTF-8 console fix (forces `SetConsoleOutputCP(65001)` on startup)
+- `suno info` prints a full ASCII command-reference table
+
+#### Dependencies
+- `typer>=0.12.0` and `rich>=13.0.0` added to `[project.dependencies]` in `pyproject.toml`
+- `suno` entry-point added to `[project.scripts]`
+
+#### Documentation
+- README: new **CLI Usage** section with full example commands
+- CONTRIBUTING.md: new **CLI Development** section (running without install, adding commands, style guidelines)
+
+---
+
 ## [2.1.0] — 2026-03-13
 
 Feature release adding MCP Prompts and Resources, a major prompt-guide upgrade, and two type-error bug fixes.

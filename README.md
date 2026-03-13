@@ -98,6 +98,10 @@ Restart Claude Desktop after saving.
 Run this once to authenticate and save your session securely:
 
 ```bash
+# Using the CLI (recommended after pip install)
+suno login
+
+# Or directly from Python
 python -c "import asyncio; from suno_mcp.tools.api.tools import ApiSunoTools; asyncio.run(ApiSunoTools().browser_login())"
 ```
 
@@ -128,6 +132,65 @@ A browser window will open — log in to Suno normally. The session (including H
 
 "What credits do I have left? (suno://credits)"
 ```
+
+---
+
+## CLI Usage
+
+After `pip install -e .` the `suno` command is available directly:
+
+```bash
+# Auth
+suno login                          # browser login, saves session to keychain
+suno status                         # session expiry + credit balance
+suno refresh --force                # force-refresh the JWT token
+suno clear-auth                     # delete all stored credentials
+
+# Generate
+suno generate "my prompt here" --tags "synthwave, female vocals" --wait
+suno generate "[Verse]\nLine one\n[Chorus]\nHook" --title "Night Drive" --model v5 --download ~/Music
+suno wait <song-id>                 # poll until audio is ready
+suno extend <song-id> --prompt "bridge lyrics" --at 60
+suno remix <song-id> "jazz version" --tags "jazz, piano"
+suno lyrics "melancholy lighthouse keeper in winter"
+
+# Library & Discovery
+suno songs                          # your library (page 0)
+suno songs --page 1
+suno song <id>
+suno trending --period week
+suno search "dark ambient"
+suno liked
+
+# Playlists
+suno playlists
+suno playlist <playlist-id>
+suno playlist-create "Chill Vibes" --desc "Late night sessions"
+suno playlist-add <playlist-id> <song-id>
+suno playlist-remove <playlist-id> <song-id>
+
+# Download
+suno download <song-id>             # MP3 + cover to ~/Music/suno-downloads/
+suno download <song-id> --output D:\Music --no-cover
+suno download-playlist <playlist-id> --output ~/Music/playlists
+suno download-library --max 40      # bulk download personal library
+
+# Account
+suno credits
+suno plans
+suno contests
+
+# Advanced
+suno stems <song-id>                # split into stems (Premier)
+suno concat <extension-clip-id>     # merge extension with parent
+
+# Quick reference
+suno info                           # all commands in one table
+suno --help
+suno generate --help
+```
+
+Run `suno <command> --help` for full option lists on any command.
 
 ---
 

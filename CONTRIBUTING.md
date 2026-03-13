@@ -1,239 +1,323 @@
-# Contributing to Suno MCP Server
+# Contributing to suno-mcp
 
-Thank you for your interest in contributing to the Suno MCP Server! This document provides guidelines and information for contributors.
+Thanks for your interest in contributing.  
+This is a **Python** project (v2.1.0) — please ignore any older Node.js references.
 
-## Development Setup
+---
 
-### Prerequisites
-- Node.js 18+ installed
-- npm or yarn package manager
-- Claude Desktop (for testing MCP integration)
-- Git
+## Quick Start
 
-### Installation
 ```bash
-# Clone the repository
-git clone https://github.com/sandraschi/suno-mcp.git
+# 1. Fork + clone
+git clone https://github.com/arlinamid/suno-mcp.git
 cd suno-mcp
 
-# Install dependencies
-npm install
+# 2. Create a virtual environment
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # macOS / Linux
 
-# Run tests
-npm test
+# 3. Install in editable mode with dev extras
+pip install -e ".[dev]"
 
-# Start development server
-npm run dev
+# 4. Install Playwright browsers
+playwright install chromium
+
+# 5. Verify
+pytest tests/unit/ -v
 ```
 
-## Development Workflow
+---
 
-### Branching Strategy
-- `main` - Production-ready code
-- `develop` - Development integration branch
-- `feature/*` - Feature branches
-- `bugfix/*` - Bug fix branches
-- `hotfix/*` - Critical fixes for production
+## Project Structure
 
-### Commit Messages
-Follow conventional commit format:
 ```
-type(scope): description
-
-[optional body]
-
-[optional footer]
+suno-mcp/
+├── src/suno_mcp/
+│   ├── server.py                    # All MCP tool / prompt / resource registration
+│   └── tools/
+│       ├── api/
+│       │   └── tools.py             # ApiSunoTools — all API + browser-assisted tools
+│       ├── basic/
+│       │   └── tools.py             # BasicSunoTools — legacy browser tools
+│       └── shared/
+│           ├── api_client.py        # httpx async client for studio-api.prod.suno.com
+│           ├── credentials.py       # OS keyring + DPAPI/Fernet secure storage
+│           └── session_manager.py   # Clerk JWT decode, expiry, auto-refresh
+├── tests/
+│   ├── unit/                        # Fully mocked — no network required
+│   └── local/                       # Live integration tests (requires login)
+├── scripts/                         # Dev utilities (intercept, model scraper, …)
+├── pyproject.toml
+├── pyrightconfig.json
+└── requirements.txt
 ```
 
-Types:
-- `feat`: New features
-- `fix`: Bug fixes
-- `docs`: Documentation
-- `style`: Code style changes
-- `refactor`: Code refactoring
-- `test`: Testing
-- `chore`: Maintenance
+---
 
-### Pull Requests
-1. Create a feature branch from `develop`
-2. Make your changes with tests
-3. Ensure all tests pass
-4. Update documentation if needed
-5. Submit PR with clear description
-6. Wait for review and CI checks
+## Adding a New MCP Tool
+
+All tools are registered in `server.py` with the `@mcp_app.tool()` decorator.
+
+```python
+@mcp_app.tool()
+async def suno_my_tool(param_one: str, param_two: int = 0) -> str:
+    """
+    One-line summary shown in the MCP inspector.
+
+    Longer description explaining what the tool does, when to use it,
+    and any requirements (e.g. authentication).
+
+    Args:
+        param_one: Description of param_one
+        param_two: Description of param_two (default: 0)
+
+    Returns:
+        Human-readable result string
+    """
+    return await api_tools.my_tool_implementation(param_one, param_two)
+```
+
+Guidelines:
+- The docstring is shown verbatim in Claude Desktop / MCP Inspector — make it useful
+- Always `async def` and return `str`
+- Validate inputs early; raise `ValueError` for bad params
+- Wrap all external calls in `try/except` and return a descriptive error string (never raise unhandled)
+- Add the underlying implementation to `tools/api/tools.py`, not in `server.py`
+
+---
+
+## Adding a New MCP Prompt
+
+Prompts are reusable workflow templates that guide an LLM through a multi-step task.
+
+```python
+@mcp_app.prompt()
+def my_workflow(theme: str, style: str = "default") -> str:
+    """
+    One-line summary of the workflow.
+
+    Args:
+        theme: What the workflow is about
+        style: Optional style hint
+    """
+    return f"""You are a Suno AI expert.
+
+**Task:** …{theme}…
+
+**Step 1 – …**
+…
+
+**Step 2 – …**
+…
+
+**Step N – Call the tool**
+```
+suno_api_generate(…)
+```
+"""
+```
+
+Guidelines:
+- Prompts are **sync** (not async)
+- Return a complete instruction string — the LLM receives this as its system context
+- Use f-string interpolation for the user-supplied parameters
+- Follow the two-field model: style tags (≤200 chars) + lyrics/prompt — see `suno://prompt-guide`
+
+---
+
+## Adding a New MCP Resource
+
+Resources expose readable context (static reference data or live API data).
+
+```python
+# Static resource
+@mcp_app.resource("suno://my-reference")
+def resource_my_reference() -> str:
+    """Short description shown in the inspector."""
+    return """# My Reference
+
+…markdown content…
+"""
+
+# Live / async resource
+@mcp_app.resource("suno://my-live-data")
+async def resource_my_live_data() -> str:
+    """Live data fetched on every read."""
+    try:
+        result = await api_tools.fetch_something()
+        return f"# My Live Data\n\n{result}"
+    except Exception as e:
+        return f"# My Live Data\n\nError: {e}"
+```
+
+Guidelines:
+- URI convention: `suno://<noun>` (lowercase, hyphens)
+- Return Markdown — MCP clients render it
+- Static resources are sync; live resources are async
+- Always include a fallback error message for live resources
+
+---
 
 ## Code Standards
 
-### JavaScript/Node.js
-- Use ES6+ features
-- Follow Airbnb JavaScript Style Guide
-- Use meaningful variable and function names
-- Add JSDoc comments for public APIs
-- Use async/await for asynchronous operations
+### Python
+- Python 3.10+ syntax (union types as `X | Y`, `match` statements OK)
+- Type-annotate all function signatures
+- `async def` for anything that touches the network or filesystem
+- No bare `except:` — always catch specific exceptions or at minimum `Exception as e`
+- No comments that just narrate the code (`# increment counter`) — only explain non-obvious intent
 
-### MCP Tools
-- Each tool must have proper input validation
-- Include comprehensive error handling
-- Provide clear, helpful error messages
-- Follow consistent parameter naming
-- Document tool behavior in comments
+### Type Checking
+This project uses **basedpyright** in `standard` mode.
 
-### Testing
-- Write unit tests for all new functionality
-- Include integration tests for tool workflows
-- Test both MCP and FastAPI interfaces
-- Maintain >80% code coverage
-- Test error conditions and edge cases
-
-## Architecture Guidelines
-
-### Dual Interface Design
-The server implements both MCP (stdio) and FastAPI (HTTP) interfaces:
-
-```javascript
-// MCP Interface (Claude Desktop)
-class SunoMCPServer {
-  // MCP protocol handlers
-}
-
-// FastAPI Interface (Web/Testing)
-class DualInterfaceServer {
-  // HTTP endpoints
-}
+```bash
+# Check types
+basedpyright src/
 ```
 
-### Tool Organization
-- Tools are organized by category
-- Each tool has consistent error handling
-- Placeholder implementations for planned features
-- Clear separation between basic and advanced tools
+Fix all `error`-level diagnostics before submitting a PR.  
+`warning`-level issues should be addressed but will not block merge.
 
-### Error Handling
-```javascript
-try {
-  // Tool implementation
-  return { success: true, result: data };
-} catch (error) {
-  return {
-    success: false,
-    error: error.message,
-    tool: toolName
-  };
-}
-```
+### Formatting
+No formatter is enforced, but keep line length ≤100 and use consistent 4-space indentation.
+
+---
 
 ## Testing
 
-### Running Tests
+### Unit Tests (no network required)
 ```bash
-# Unit tests
-npm test
-
-# Local interface tests
-npm run test:local
-
-# Watch mode
-npm run test:watch
+pytest tests/unit/ -v
 ```
+
+All external calls (httpx, playwright, keyring) must be mocked.  
+Use `unittest.mock.AsyncMock` for async methods.
+
+### Live Integration Tests (requires prior login)
+```bash
+# Authenticate first
+python -c "
+import asyncio
+from suno_mcp.tools.api.tools import ApiSunoTools
+asyncio.run(ApiSunoTools().browser_login())
+"
+
+# Then run
+pytest tests/local/ -v -s
+```
+
+### Coverage
+```bash
+pytest tests/unit/ --cov=suno_mcp --cov-report=term-missing
+```
+
+Target: **≥80% line coverage** on `tools/shared/` modules.
 
 ### Test Structure
 ```
 tests/
-├── unit/           # Unit tests
-├── integration/    # Integration tests
-└── local/          # PowerShell interface tests
+├── unit/
+│   ├── test_api_client.py       # ApiClient mocked network calls
+│   ├── test_api_tools.py        # ApiSunoTools method tests
+│   ├── test_credentials.py      # Credential storage tests
+│   ├── test_server_tools.py     # MCP tool registration tests
+│   └── test_session_manager.py  # JWT decode / refresh tests
+└── local/
+    └── test_live_api.py         # End-to-end against real Suno API
 ```
 
-### Coverage Requirements
-- Minimum 80% code coverage
-- All public functions tested
-- Error conditions covered
-- Edge cases included
+---
 
-## Documentation
+## Branching & Commits
 
-### Requirements
-- Update README.md for new features
-- Add JSDoc comments for new functions
-- Update CHANGELOG.md for changes
-- Include examples in documentation
+### Branches
+| Pattern | Use |
+|---------|-----|
+| `main` | Stable, always deployable |
+| `feat/<name>` | New features |
+| `fix/<name>` | Bug fixes |
+| `docs/<name>` | Documentation only |
+| `chore/<name>` | Tooling, CI, dependencies |
 
-### API Documentation
-- Use OpenAPI/Swagger for FastAPI endpoints
-- Document MCP tool schemas
-- Include request/response examples
-- Provide troubleshooting guides
+### Conventional Commits
+```
+type(scope): short description
 
-## Security Considerations
+[optional body — explain WHY, not WHAT]
 
-### Credentials
-- Never log or store user credentials
-- Use secure parameter passing
-- Implement proper session handling
-- Follow least privilege principle
+[optional footer — BREAKING CHANGE: …]
+```
 
-### Browser Automation
-- Use isolated browser contexts
-- Implement proper cleanup
-- Handle sensitive data carefully
-- Respect platform terms of service
+Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`
 
-## Performance Guidelines
+Examples:
+```
+feat(server): add suno_api_generate_stems tool
+fix(credentials): handle DPAPI failure on first run gracefully
+docs(readme): add Cursor integration example
+```
 
-### MCP Tools
-- Respond within 2 seconds for simple operations
-- Handle timeouts gracefully
-- Implement proper resource cleanup
-- Monitor memory usage
+---
 
-### FastAPI Endpoints
-- Return appropriate HTTP status codes
-- Implement rate limiting where needed
-- Use efficient data structures
-- Cache results when appropriate
+## Pull Requests
 
-## Release Process
+1. Branch from `main`: `git checkout -b feat/my-feature`
+2. Make your changes with tests
+3. Run `pytest tests/unit/ -v` — all must pass
+4. Run `basedpyright src/` — no new errors
+5. Update `CHANGELOG.md` under `[Unreleased]`
+6. Open a PR against `arlinamid/suno-mcp:main`
+7. Fill in the PR template (what, why, how tested)
 
-### Versioning
-Follow semantic versioning (MAJOR.MINOR.PATCH):
-- MAJOR: Breaking changes
-- MINOR: New features (backward compatible)
-- PATCH: Bug fixes (backward compatible)
+---
 
-### Release Checklist
-- [ ] All tests pass
-- [ ] Documentation updated
-- [ ] CHANGELOG.md updated
-- [ ] Version bumped appropriately
-- [ ] Git tag created
-- [ ] GitHub release created
+## Security
+
+- **Never log credentials, tokens, or cookie values** — use fingerprints (`value[:8]…`)
+- Session cookies go through `credentials.py` → OS keyring only
+- Large values (> 1800 bytes) use DPAPI (Windows) or Fernet AES (macOS/Linux)
+- No plaintext secrets in config files, environment variables, or test fixtures
+- If you find a security issue, please open a **private** GitHub Security Advisory rather than a public issue
+
+---
+
+## Release Checklist
+
+- [ ] `pytest tests/unit/ -v` passes
+- [ ] `basedpyright src/` — no new errors
+- [ ] `CHANGELOG.md` — new version section added
+- [ ] Version bumped in `pyproject.toml` and `server.py` (4 occurrences)
+- [ ] `README.md` — "Last updated" and "Version" lines updated
+- [ ] `git tag v<X.Y.Z>` created
+- [ ] GitHub Release published with changelog excerpt
+
+### Versioning (SemVer)
+| Change | Bump |
+|--------|------|
+| Breaking change to existing tool signature or behaviour | MAJOR |
+| New tool / prompt / resource added | MINOR |
+| Bug fix, typo, refactor with no API change | PATCH |
+
+---
 
 ## Getting Help
 
-### Issues
-- Use GitHub Issues for bugs and feature requests
-- Provide detailed reproduction steps
-- Include relevant log output
-- Specify your environment (OS, Node version, etc.)
+- **Bug reports / feature requests** — [GitHub Issues](https://github.com/arlinamid/suno-mcp/issues)
+- **Questions / ideas** — [GitHub Discussions](https://github.com/arlinamid/suno-mcp/discussions)
+- Include: OS, Python version, error message + full traceback, steps to reproduce
 
-### Discussions
-- Use GitHub Discussions for questions
-- Share ideas and use cases
-- Discuss architecture decisions
-- Get community help
+---
 
 ## Code of Conduct
 
-This project follows a code of conduct to ensure a welcoming environment for all contributors:
+- Be respectful and constructive
+- Welcome newcomers
+- Keep feedback focused on the code, not the person
+- Respect differing viewpoints and implementation choices
 
-- Be respectful and inclusive
-- Focus on constructive feedback
-- Help newcomers learn and contribute
-- Maintain professional communication
-- Respect differing viewpoints
+---
 
 ## License
 
-By contributing to this project, you agree that your contributions will be licensed under the same license as the project (MIT License).
-
-Thank you for contributing to the Suno MCP Server! 🎵🤖
+By contributing you agree your changes will be released under the **MIT License**.

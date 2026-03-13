@@ -1,0 +1,11 @@
+{
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Windows",
+  "pythonPath": "C:/Users/arlin/AppData/Local/Programs/Python/Python311/python.exe",
+  "venvPath": ".",
+  "include": ["src", "tests"],
+  "exclude": ["**/__pycache__", "**/.pytest_cache", "**/htmlcov"],
+  "typeCheckingMode": "standard",
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none"
+}

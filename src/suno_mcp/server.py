@@ -16,6 +16,7 @@ from mcp.server import FastMCP
 from pydantic import BaseModel
 
 from .tools.basic.tools import BasicSunoTools
+from .tools.api.tools import ApiSunoTools
 
 
 # FastAPI Models
@@ -45,6 +46,7 @@ class StatusResponse(BaseModel):
 
 # Global instances
 basic_tools = BasicSunoTools()
+api_tools = ApiSunoTools()
 
 # FastMCP App
 mcp_app = FastMCP("suno-mcp")
@@ -91,9 +93,9 @@ async def health_check():
 
     return HealthResponse(
         status="ok",
-        version="1.0.0",
+        version="2.0.0",
         uptime=current_time - start_time,
-        tools_loaded=23  # Total number of tools
+        tools_loaded=53  # 6 browser + 26 API + 3 session + 4 credentials + help
     )
 
 
@@ -119,21 +121,64 @@ async def get_status():
 @fastapi_app.get("/api/v1/tools")
 async def list_tools():
     """List all available tools via FastAPI."""
-    tools = []
-
-    # Basic tools
-    basic_tool_names = [
-        "suno_open_browser", "suno_login", "suno_generate_track",
-        "suno_download_track", "suno_get_status", "suno_close_browser"
+    session_tools = [
+        {"name": "suno_browser_login", "category": "session", "auth": "none",
+         "description": "Open browser, log in, capture full cookie jar for auto-refresh"},
+        {"name": "suno_refresh_session", "category": "session", "auth": "none",
+         "description": "Silently refresh __session JWT via Clerk HTTP API"},
+        {"name": "suno_session_info", "category": "session", "auth": "none",
+         "description": "Show current session status and token expiry"},
     ]
-    for name in basic_tool_names:
-        tools.append({
-            "name": name,
-            "description": getattr(basic_tools, f"get_{name}_description", lambda: f"{name} tool")(),
-            "category": "basic"
-        })
-
-    return {"tools": tools}
+    credential_tools = [
+        {"name": "suno_save_cookie", "category": "credentials", "auth": "none"},
+        {"name": "suno_save_token", "category": "credentials", "auth": "none"},
+        {"name": "suno_credential_status", "category": "credentials", "auth": "none"},
+        {"name": "suno_clear_credentials", "category": "credentials", "auth": "none"},
+    ]
+    browser_tools = [
+        {"name": "suno_open_browser", "category": "browser", "auth": "none"},
+        {"name": "suno_login", "category": "browser", "auth": "email_password"},
+        {"name": "suno_generate_track", "category": "browser", "auth": "session"},
+        {"name": "suno_download_track", "category": "browser", "auth": "session"},
+        {"name": "suno_get_status", "category": "browser", "auth": "none"},
+        {"name": "suno_close_browser", "category": "browser", "auth": "none"},
+    ]
+    api_tool_names = [
+        {"name": "suno_api_check_auth", "category": "api", "auth": "optional"},
+        {"name": "suno_api_get_credits", "category": "api", "auth": "required"},
+        {"name": "suno_api_get_trending", "category": "api", "auth": "none"},
+        {"name": "suno_api_get_song", "category": "api", "auth": "none"},
+        {"name": "suno_api_search", "category": "api", "auth": "none"},
+        {"name": "suno_api_get_playlist", "category": "api", "auth": "none"},
+        {"name": "suno_api_get_subscription_plans", "category": "api", "auth": "none"},
+        {"name": "suno_api_get_contests", "category": "api", "auth": "none"},
+        {"name": "suno_api_get_my_songs", "category": "api", "auth": "required"},
+        {"name": "suno_api_get_my_playlists", "category": "api", "auth": "required"},
+        {"name": "suno_api_generate", "category": "api", "auth": "required"},
+        {"name": "suno_api_extend", "category": "api", "auth": "required"},
+        {"name": "suno_api_remix", "category": "api", "auth": "required"},
+        {"name": "suno_api_inpaint", "category": "api", "auth": "required"},
+        {"name": "suno_api_like_song", "category": "api", "auth": "required"},
+        {"name": "suno_api_delete_song", "category": "api", "auth": "required"},
+        {"name": "suno_api_make_public", "category": "api", "auth": "required"},
+        {"name": "suno_api_create_playlist", "category": "api", "auth": "required"},
+        {"name": "suno_api_add_to_playlist", "category": "api", "auth": "required"},
+        {"name": "suno_api_remove_from_playlist", "category": "api", "auth": "required"},
+        {"name": "suno_api_update_playlist", "category": "api", "auth": "required"},
+        {"name": "suno_api_get_liked_songs", "category": "api", "auth": "required"},
+        {"name": "suno_api_wait_for_song", "category": "api", "auth": "required"},
+        {"name": "suno_api_download_song", "category": "api", "auth": "none"},
+        {"name": "suno_api_download_playlist", "category": "api", "auth": "none"},
+        {"name": "suno_api_download_my_songs", "category": "api", "auth": "required"},
+    ]
+    all_tools = session_tools + credential_tools + browser_tools + api_tool_names
+    return {
+        "tools": all_tools,
+        "total": len(all_tools),
+        "api_base": "https://studio-api.prod.suno.com/api",
+        "auth_setup": "Run suno_browser_login() for automatic session management",
+        "auth_methods": ["browser_login (recommended)", "SUNO_COOKIE", "SUNO_AUTH_TOKEN"],
+    }
 
 
 @fastapi_app.post("/api/v1/tools/{tool_name}")
@@ -289,6 +334,753 @@ async def suno_close_browser() -> str:
     return await basic_tools.close_browser()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# API TOOLS — Direct HTTP calls to studio-api.prod.suno.com (no browser needed)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@mcp_app.tool()
+async def suno_api_check_auth() -> str:
+    """
+    Check API authentication status and test the Suno API connection.
+
+    Shows whether SUNO_COOKIE or SUNO_AUTH_TOKEN are configured, and verifies
+    the connection by fetching the current user session.
+
+    To authenticate:
+      1. Open suno.com in Chrome and log in
+      2. Open DevTools (F12) → Application → Cookies → https://suno.com
+      3. Copy the value of the '__session' cookie
+      4. Set environment variable: SUNO_COOKIE=__session=<value>
+
+    Returns:
+        Auth status, user info if authenticated, setup instructions if not
+    """
+    return await api_tools.check_auth()
+
+
+@mcp_app.tool()
+async def suno_api_get_credits() -> str:
+    """
+    Get your remaining Suno credits and subscription details.
+
+    Shows plan name, credits remaining, monthly limit, and usage.
+    Requires authentication (SUNO_COOKIE or SUNO_AUTH_TOKEN).
+
+    Returns:
+        Credits balance and subscription plan information
+    """
+    return await api_tools.get_credits()
+
+
+@mcp_app.tool()
+async def suno_api_get_trending(page: int = 0, period: str = "") -> str:
+    """
+    Get trending songs on Suno (public, no auth needed).
+
+    Args:
+        page: Page number for pagination (default: 0)
+        period: Time period — '' (all-time), 'week', 'day' (default: all-time)
+
+    Returns:
+        List of trending songs with titles, IDs, tags, play counts, and audio URLs
+    """
+    return await api_tools.get_trending_songs(page=page, period=period)
+
+
+@mcp_app.tool()
+async def suno_api_get_song(song_id: str) -> str:
+    """
+    Get detailed information about a specific song by its ID.
+
+    Works for any public song. For your private songs, authentication is required.
+
+    Args:
+        song_id: The song/clip UUID (e.g., 'b3142399-f73e-4fc7-b5da-738cf6957e6f')
+
+    Returns:
+        Full song details: title, author, audio URL, video URL, tags, duration,
+        play count, likes, model version, creation date
+    """
+    return await api_tools.get_song(song_id=song_id)
+
+
+@mcp_app.tool()
+async def suno_api_search(
+    query: str,
+    search_type: str = "audio",
+    page: int = 0,
+) -> str:
+    """
+    Search for songs, playlists, or users on Suno (public, no auth needed).
+
+    Args:
+        query: Search term (e.g., 'upbeat pop', 'dark ambient', 'lo-fi beats')
+        search_type: What to search — 'audio' (songs), 'playlist', or 'user'
+        page: Page number for pagination (default: 0)
+
+    Returns:
+        Matching songs/playlists/users with IDs, titles, tags, and URLs
+    """
+    return await api_tools.search_songs(query=query, search_type=search_type, page=page)
+
+
+@mcp_app.tool()
+async def suno_api_get_playlist(playlist_id: str, page: int = 0) -> str:
+    """
+    Get contents of a Suno playlist by its ID (public, no auth needed).
+
+    Args:
+        playlist_id: The playlist UUID
+        page: Page number for pagination (default: 0)
+
+    Returns:
+        Playlist metadata and list of songs with IDs, titles, and durations
+    """
+    return await api_tools.get_playlist(playlist_id=playlist_id, page=page)
+
+
+@mcp_app.tool()
+async def suno_api_get_my_songs(page: int = 0) -> str:
+    """
+    Get your personal song library (requires authentication).
+
+    Shows all songs you've generated including their status (queued, streaming,
+    complete), IDs, titles, tags, and audio URLs.
+
+    Args:
+        page: Page number for pagination (default: 0)
+
+    Returns:
+        Your songs with status, IDs, titles, tags, durations, and audio URLs
+    """
+    return await api_tools.get_my_songs(page=page)
+
+
+@mcp_app.tool()
+async def suno_api_generate(
+    prompt: str,
+    tags: str = "",
+    title: str = "",
+    make_instrumental: bool = False,
+    model: str = "v5",
+    negative_tags: str = "",
+    vocal_gender: str = "",
+    weirdness: int = 50,
+    style_weight: int = 50,
+) -> str:
+    """
+    Generate a new song — full v5 support with all advanced options.
+    Uses browser-assisted generation: opens a brief window (~15s) to pass hCaptcha,
+    then closes automatically. Always produces 2 variations per call.
+    Use suno_api_wait_for_song(<id>) or suno_api_download_song(<id>) afterwards.
+
+    MODELS (use short alias or full API name):
+      v5  / chirp-crow     — v5 Pro: best quality & control          [DEFAULT]
+      v4.5x / chirp-bluejay— v4.5x Pro: advanced creation methods
+      v4.5  / chirp-auk   — v4.5 Pro: intelligent prompts
+      v4.5-all / chirp-v4-5— v4.5 all: best free model
+      v4  / chirp-v4       — v4 Pro: improved sound quality
+      v3.5 / chirp-v3-5   — v3.5: classic
+      v3  / chirp-v3       — v3: basic
+
+    PROMPT MODES:
+      Auto  — just describe the vibe: "sad Hungarian rap about sleepless nights"
+      Custom — write full lyrics with section tags:
+               [Verse]\\nLyric line 1\\nLyric line 2\\n[Chorus]\\nHook line...
+
+    Args:
+        prompt: Lyrics (custom mode) or style/mood description (auto mode)
+        tags: Musical style tags, comma-separated
+              e.g. "Hungarian rap, 90 BPM, minor key, male vocals, cinematic"
+        title: Song title (auto-generated if omitted)
+        make_instrumental: True = pure instrumental, no vocals
+        model: Model version (default: 'v5')
+        negative_tags: Styles to avoid, e.g. "electric guitar, auto-tune, trap"
+        vocal_gender: "male", "female", or "" (Suno decides)
+        weirdness: 0–100 — creativity/unexpectedness (default: 50)
+        style_weight: 0–100 — how strictly style tags are applied (default: 50)
+
+    Cost: 10 credits × 2 variations = 20 credits
+
+    Requires: Authentication (run suno_browser_login() first)
+    """
+    return await api_tools.api_generate_track(
+        prompt=prompt,
+        tags=tags,
+        title=title,
+        make_instrumental=make_instrumental,
+        model=model,
+        negative_tags=negative_tags,
+        vocal_gender=vocal_gender,
+        weirdness=weirdness,
+        style_weight=style_weight,
+    )
+
+
+@mcp_app.tool()
+async def suno_api_extend(
+    song_id: str,
+    prompt: str = "",
+    tags: str = "",
+    continue_at: float = 0.0,
+    model: str = "v5",
+) -> str:
+    """
+    Extend an existing song — continue generating from where it ends.
+
+    Useful for making songs longer or creating a sequel section.
+
+    Args:
+        song_id: ID of the song to extend
+        prompt: Additional lyrics or style description for the extension
+        tags: Style tags for the extended section
+        continue_at: Timestamp in seconds to branch from (0 = from end of song)
+        model: AI model version
+
+    Returns:
+        New clip IDs for the extended version
+
+    Requires: Authentication
+    """
+    return await api_tools.api_extend_song(
+        song_id=song_id,
+        prompt=prompt,
+        tags=tags,
+        continue_at=continue_at,
+        model=model,
+    )
+
+
+@mcp_app.tool()
+async def suno_api_remix(
+    song_id: str,
+    prompt: str,
+    tags: str = "",
+    title: str = "",
+    model: str = "v5",
+) -> str:
+    """
+    Remix an existing song with a new style, genre, or lyrics.
+
+    Takes an existing song and regenerates it with new creative direction
+    while potentially keeping some of the original structure.
+
+    Args:
+        song_id: ID of the source song to remix
+        prompt: New style description or lyrics
+        tags: New style tags (e.g., "jazz, piano, acoustic" to change genre)
+        title: Title for the remix (optional)
+        model: AI model version
+
+    Returns:
+        New clip IDs for the remixed version
+
+    Requires: Authentication
+    """
+    return await api_tools.api_remix_song(
+        song_id=song_id,
+        prompt=prompt,
+        tags=tags,
+        title=title,
+        model=model,
+    )
+
+
+@mcp_app.tool()
+async def suno_api_inpaint(
+    song_id: str,
+    start_seconds: float,
+    end_seconds: float,
+    prompt: str,
+    tags: str = "",
+) -> str:
+    """
+    Edit a specific section of an existing song (inpainting/surgery).
+
+    Re-generates only the section between start and end timestamps while
+    keeping the rest of the song intact.
+
+    Args:
+        song_id: ID of the song to edit
+        start_seconds: Start time of section to replace (seconds, e.g., 30.0)
+        end_seconds: End time of section to replace (seconds, e.g., 60.0)
+        prompt: Description or lyrics for the new section
+        tags: Style tags for the replacement section
+
+    Returns:
+        New clip ID with the edited version
+
+    Requires: Authentication (Pro plan or higher)
+    """
+    return await api_tools.api_inpaint_song(
+        song_id=song_id,
+        start_seconds=start_seconds,
+        end_seconds=end_seconds,
+        prompt=prompt,
+        tags=tags,
+    )
+
+
+@mcp_app.tool()
+async def suno_api_like_song(song_id: str) -> str:
+    """
+    Like/upvote a Suno song.
+
+    Args:
+        song_id: The song UUID to like
+
+    Returns:
+        Confirmation of the like action
+
+    Requires: Authentication
+    """
+    return await api_tools.api_like_song(song_id=song_id)
+
+
+@mcp_app.tool()
+async def suno_api_delete_song(song_id: str) -> str:
+    """
+    Move a song to trash (soft delete from your library).
+
+    The song will be removed from your library but can be recovered.
+
+    Args:
+        song_id: The song UUID to delete
+
+    Returns:
+        Confirmation of deletion
+
+    Requires: Authentication
+    """
+    return await api_tools.api_delete_song(song_id=song_id)
+
+
+@mcp_app.tool()
+async def suno_api_make_public(song_id: str) -> str:
+    """
+    Make one of your songs publicly visible on Suno.
+
+    Args:
+        song_id: The song UUID to publish
+
+    Returns:
+        Confirmation that the song is now public
+
+    Requires: Authentication
+    """
+    return await api_tools.api_make_public(song_id=song_id)
+
+
+@mcp_app.tool()
+async def suno_api_get_subscription_plans() -> str:
+    """
+    Get all available Suno subscription plans and pricing (public, no auth needed).
+
+    Shows Free, Pro, and Premier plans with prices, credit limits, and features.
+
+    Returns:
+        List of plans with pricing, credits, and feature comparison
+    """
+    return await api_tools.get_subscription_plans()
+
+
+@mcp_app.tool()
+async def suno_api_get_contests() -> str:
+    """
+    Get currently active Suno song contests (public, no auth needed).
+
+    Returns:
+        List of active contests with names, deadlines, and IDs
+    """
+    return await api_tools.get_contests()
+
+
+@mcp_app.tool()
+async def suno_api_create_playlist(name: str, description: str = "") -> str:
+    """
+    Create a new playlist in your Suno library.
+
+    Args:
+        name: Playlist name
+        description: Optional description of the playlist
+
+    Returns:
+        New playlist ID and confirmation
+
+    Requires: Authentication
+    """
+    return await api_tools.api_create_playlist(name=name, description=description)
+
+
+@mcp_app.tool()
+async def suno_api_add_to_playlist(playlist_id: str, song_id: str) -> str:
+    """
+    Add a song to one of your playlists.
+
+    Args:
+        playlist_id: The target playlist UUID
+        song_id: The song UUID to add
+
+    Returns:
+        Confirmation of the action
+
+    Requires: Authentication
+    """
+    return await api_tools.api_add_to_playlist(playlist_id=playlist_id, song_id=song_id)
+
+
+@mcp_app.tool()
+async def suno_api_remove_from_playlist(playlist_id: str, song_id: str) -> str:
+    """
+    Remove a song from one of your playlists.
+
+    Args:
+        playlist_id: The playlist UUID
+        song_id: The song/clip UUID to remove
+
+    Returns:
+        Confirmation of the action
+
+    Requires: Authentication
+    """
+    return await api_tools.api_remove_from_playlist(playlist_id=playlist_id, song_id=song_id)
+
+
+@mcp_app.tool()
+async def suno_api_update_playlist(
+    playlist_id: str,
+    name: str = "",
+    description: str = "",
+    is_public: Optional[bool] = None,
+) -> str:
+    """
+    Rename or update a playlist's name, description, or visibility.
+
+    Args:
+        playlist_id: The playlist UUID
+        name: New name (leave blank to keep current)
+        description: New description (leave blank to keep current)
+        is_public: True=public, False=private, None=unchanged
+
+    Returns:
+        Updated playlist info
+
+    Requires: Authentication
+    """
+    return await api_tools.api_update_playlist(
+        playlist_id=playlist_id, name=name, description=description, is_public=is_public
+    )
+
+
+@mcp_app.tool()
+async def suno_api_get_liked_songs(page: int = 0) -> str:
+    """
+    Get songs you have liked/upvoted on Suno.
+
+    Args:
+        page: Page number (0-based, 20 songs per page)
+
+    Returns:
+        List of liked songs with IDs, titles, and audio URLs
+
+    Requires: Authentication
+    """
+    return await api_tools.get_liked_songs(page=page)
+
+
+@mcp_app.tool()
+async def suno_api_wait_for_song(song_id: str, timeout: int = 120) -> str:
+    """
+    Wait for a song to finish generating, then return its details and audio URL.
+
+    Use this after suno_api_generate() to get the final result.
+    Polls every 5 seconds until status='complete' or timeout is reached.
+
+    Args:
+        song_id: The clip UUID returned by suno_api_generate()
+        timeout: Maximum seconds to wait (default: 120)
+
+    Returns:
+        Song details with audio URL, or timeout message
+    """
+    return await api_tools.wait_for_song(song_id=song_id, timeout=timeout)
+
+
+@mcp_app.tool()
+async def suno_api_download_song(
+    song_id: str,
+    output_dir: str = "",
+    include_cover: bool = True,
+    wait_if_processing: bool = True,
+) -> str:
+    """
+    Download a song's MP3 audio (and optionally cover art) to a local folder.
+
+    Works for any song — your own or public songs found via search/trending.
+    Automatically waits if the song is still generating (up to 120 seconds).
+
+    Args:
+        song_id: The song/clip UUID (from trending, search, library, or generation)
+        output_dir: Folder to save files (default: ~/Music/suno-downloads/)
+        include_cover: Also download the cover image (default: True)
+        wait_if_processing: Wait for generation to complete before downloading
+
+    Returns:
+        Download summary with saved file paths and file sizes
+
+    Example:
+        suno_api_download_song("abc123-...", output_dir="C:/Music/Suno")
+    """
+    return await api_tools.download_song(
+        song_id=song_id,
+        output_dir=output_dir,
+        include_cover=include_cover,
+        wait_if_processing=wait_if_processing,
+    )
+
+
+@mcp_app.tool()
+async def suno_api_download_playlist(
+    playlist_id: str,
+    output_dir: str = "",
+    max_songs: int = 50,
+) -> str:
+    """
+    Download all songs in a playlist to a local folder.
+
+    Creates a subfolder named after the playlist. Downloads MP3 + cover art
+    for each song. Skips songs without audio URLs.
+
+    Args:
+        playlist_id: The playlist UUID (from suno_api_get_my_playlists or a URL)
+        output_dir: Parent folder (default: ~/Music/suno-downloads/<playlist_name>/)
+        max_songs: Maximum number of songs to download (default: 50)
+
+    Returns:
+        Download summary — how many succeeded, failed, and where files are saved
+    """
+    return await api_tools.download_playlist(
+        playlist_id=playlist_id,
+        output_dir=output_dir,
+        max_songs=max_songs,
+    )
+
+
+@mcp_app.tool()
+async def suno_api_download_my_songs(
+    output_dir: str = "",
+    page: int = 0,
+    max_songs: int = 20,
+    only_complete: bool = True,
+) -> str:
+    """
+    Batch download songs from your personal Suno library.
+
+    Downloads MP3 + cover art for each song. Run multiple times with
+    increasing page numbers to download your entire library in batches.
+
+    Args:
+        output_dir: Folder to save files (default: ~/Music/suno-downloads/my-songs/)
+        page: Library page to fetch (0-based, 20 songs per page)
+        max_songs: Maximum songs to download per call (default: 20)
+        only_complete: Skip songs still generating (default: True)
+
+    Returns:
+        Summary: X downloaded, Y skipped, Z failed — with file paths
+
+    Requires: Authentication
+    """
+    return await api_tools.download_my_songs(
+        output_dir=output_dir,
+        page=page,
+        max_songs=max_songs,
+        only_complete=only_complete,
+    )
+
+
+@mcp_app.tool()
+async def suno_api_get_my_playlists() -> str:
+    """
+    Get your personal playlists (requires authentication).
+
+    Returns:
+        List of your playlists with names, song counts, and IDs
+    """
+    return await api_tools.get_my_playlists()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SESSION MANAGEMENT — Login, refresh, and status
+# ─────────────────────────────────────────────────────────────────────────────
+
+@mcp_app.tool()
+async def suno_browser_login(headless: bool = False, timeout: int = 120) -> str:
+    """
+    Open a browser window and log into Suno — the MCP captures ALL session
+    cookies automatically (including the HTTP-only __client Clerk token).
+
+    This is the RECOMMENDED way to authenticate. After this:
+      • Your __session JWT refreshes automatically every 60 minutes
+      • No manual re-login needed until your Clerk session expires (months)
+      • Fast HTTP-based refresh via auth.suno.com (no browser needed for refresh)
+      • Falls back to headless browser if HTTP refresh fails
+
+    What gets captured (securely, in OS keychain):
+      __client         — HTTP-only long-lived Clerk client token (KEY for refresh)
+      __session        — Short-lived JWT (60 min)
+      __client_uat     — Client update timestamp
+      suno_device_id   — Your persistent Suno device ID
+      + all other suno.com session cookies
+
+    Steps:
+      1. Call this tool
+      2. A browser window opens (or check headless=True for CI use)
+      3. Log in with your Google/Apple/email account
+      4. The MCP automatically captures and saves your session
+
+    Args:
+        headless: Run without a visible window (for CI / pre-injected cookies).
+        timeout:  Seconds to wait for login completion (default: 120).
+
+    Returns:
+        Session info and confirmation of captured cookies.
+    """
+    return await api_tools.browser_login(headless=headless, timeout=timeout)
+
+
+@mcp_app.tool()
+async def suno_refresh_session(force: bool = False) -> str:
+    """
+    Manually refresh the __session JWT token without re-logging in.
+
+    The MCP already calls this automatically before API requests when the
+    token is about to expire. Use this tool to:
+      • Verify that auto-refresh is working
+      • Pre-refresh a token proactively
+      • Troubleshoot authentication issues
+
+    Requires a full session captured by suno_browser_login() — specifically
+    the __client HTTP-only cookie (stored in your OS keychain).
+
+    Args:
+        force: Refresh even if the current token is still valid.
+
+    Returns:
+        Refresh outcome and new token expiry info.
+    """
+    return await api_tools.refresh_session(force=force)
+
+
+@mcp_app.tool()
+async def suno_session_info() -> str:
+    """
+    Show current session status — token validity, expiry time, user info,
+    and whether automatic refresh is available.
+
+    No secrets are ever revealed — only non-sensitive claims from the JWT
+    (email, user ID, expiry time) and the storage backend name.
+
+    Returns:
+        Session status summary.
+    """
+    return await api_tools.session_info()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CREDENTIAL MANAGEMENT — Manual / legacy cookie storage
+# ─────────────────────────────────────────────────────────────────────────────
+
+@mcp_app.tool()
+async def suno_save_cookie(cookie: str) -> str:
+    """
+    Securely save your Suno session cookie to the OS credential vault.
+
+    The cookie is validated, then stored in:
+      • Windows Credential Manager  (Windows)
+      • macOS Keychain               (macOS)
+      • libsecret / KWallet          (Linux)
+
+    It is NEVER written to disk as plaintext, logged, or echoed back.
+
+    How to get your cookie:
+      1. Open https://suno.com in Chrome and log in
+      2. Press F12 → Application tab → Cookies → https://suno.com
+      3. Find the '__session' row and copy its Value
+      4. Call this tool with: __session=<paste_value_here>
+         (you can include other cookies too, the tool only needs __session)
+
+    Args:
+        cookie: Cookie string containing __session=<jwt>
+                Example: "__session=eyJhbGci..."
+
+    Returns:
+        Confirmation with a safe fingerprint (never the secret itself)
+    """
+    from .tools.shared.credentials import get_credential_store
+    store = get_credential_store()
+    return store.save_cookie(cookie)
+
+
+@mcp_app.tool()
+async def suno_save_token(token: str) -> str:
+    """
+    Securely save a raw Suno JWT bearer token to the OS credential vault.
+
+    Use this as an alternative to suno_save_cookie() if you have the raw
+    JWT token rather than the full cookie string.
+
+    The token is validated (must be a valid JWT), then stored in the OS
+    keychain. It is never logged or echoed back.
+
+    How to get your token:
+      1. Open https://suno.com in Chrome and log in
+      2. Press F12 → Network tab → filter by 'studio-api.prod.suno.com'
+      3. Click any authenticated request
+      4. In Request Headers, copy the value after 'Authorization: Bearer '
+
+    Args:
+        token: Raw Clerk JWT token (header.payload.signature format)
+
+    Returns:
+        Confirmation with a safe fingerprint (never the secret itself)
+    """
+    from .tools.shared.credentials import get_credential_store
+    store = get_credential_store()
+    return store.save_token(token)
+
+
+@mcp_app.tool()
+async def suno_credential_status() -> str:
+    """
+    Show current credential status (no secrets revealed).
+
+    Displays whether credentials are configured, which backend stores them,
+    and a safe cryptographic fingerprint — never the actual token value.
+
+    Returns:
+        Backend name, credential presence, and fingerprints
+    """
+    from .tools.shared.credentials import get_credential_store
+    store = get_credential_store()
+    return store.status()
+
+
+@mcp_app.tool()
+async def suno_clear_credentials() -> str:
+    """
+    Remove all stored Suno credentials from the OS keychain.
+
+    This deletes the saved session cookie and/or bearer token from the
+    OS credential vault and clears them from memory. You will need to
+    re-authenticate using suno_save_cookie() or suno_login() afterwards.
+
+    Returns:
+        Confirmation of what was deleted
+    """
+    from .tools.shared.credentials import get_credential_store
+    store = get_credential_store()
+    return store.clear()
+
 
 # FastMCP 2.12 Standard: Multilevel Help Tool
 @mcp_app.tool()
@@ -307,90 +1099,210 @@ async def help(level: str = "basic") -> str:
     """
     if level == "basic":
         return """
-🎵 **Suno MCP Server Help**
+Suno MCP Server Help
 
-**Available Tool Categories:**
-• **Basic Tools (6)**: Core Suno AI functionality
-• **Studio Tools (17)**: Advanced DAW features
+Tool Categories:
+  Login & Session (3)  — Browser login + automatic JWT refresh
+  API Tools (17)       — Direct HTTP calls, no browser needed  [RECOMMENDED]
+  Credentials (4)      — Manual cookie/token management (legacy)
+  Browser Tools (6)    — Playwright-based automation (legacy)
 
-**Getting Started:**
-1. Use `suno_open_browser()` to start a session
-2. Use `suno_login()` to authenticate
-3. Use `suno_generate_track()` to create music
-4. Use `studio_open()` for advanced production
+QUICK START (one-time setup):
+1. Run: suno_browser_login()
+   → A browser window opens. Log in with your Google/Apple/email account.
+   → The MCP captures your full session (including the HTTP-only __client token).
+   → JWT tokens are now refreshed automatically every 60 minutes.
 
-**For detailed help:** Use `help("detailed")`
+2. Check: suno_session_info()
+   → Confirm your session is active and see when it expires.
+
+3. Generate music: suno_api_generate("a dreamy synthwave track about space")
+   → Submits the generation request.
+
+4. Explore: suno_api_get_trending()
+   → No auth needed!
+
+For detailed help: help("detailed") or help("examples")
 """
     elif level == "detailed":
         return """
-🎵 **Suno MCP Server - Detailed Help**
+Suno MCP Server - All Tools
 
-**Basic Tools:**
-- `suno_open_browser(headless=true)` - Start browser session
-- `suno_login(email, password)` - Authenticate with Suno
-- `suno_generate_track(prompt, style, lyrics, duration)` - Generate music
-- `suno_download_track(track_id, path, include_stems)` - Download tracks
-- `suno_get_status()` - Check session status
-- `suno_close_browser()` - End session
+━━━ LOGIN & SESSION (new — recommended) ━━━
+- suno_browser_login(headless, timeout) — Opens browser, captures full cookie jar
+- suno_refresh_session(force)           — Manually refresh JWT (auto-called before requests)
+- suno_session_info()                   — Show session status & token expiry
 
-**Studio Tools (Requires Premier):**
-- `studio_open()` - Launch Suno Studio DAW
-- `studio_create_project(name, template, bpm, key)` - New project
-- `studio_generate_stem(prompt, type, position, duration)` - Add stems
-- `studio_arrange_track(track_id, position)` - Edit timeline
-- `studio_set_bpm(bpm)` - Change tempo
-- `studio_adjust_volume(track_id, volume)` - Mix levels
-- `studio_add_effect(track_id, effect_type)` - Apply effects
-- `studio_export_project()` - Export final mix
+━━━ API TOOLS (Direct HTTP — no browser) ━━━
+AUTH:
+- suno_api_check_auth()       — Check auth status & test connection
+- suno_api_get_credits()      — Remaining credits & subscription plan
 
-**FastAPI Endpoints:**
-- GET `/health` - Health check
-- GET `/api/docs` - OpenAPI documentation
-- GET `/api/v1/tools` - List tools
-- POST `/api/v1/tools/{name}` - Execute tools
-- GET `/api/v1/status` - Server status
+DISCOVERY (public, no auth):
+- suno_api_get_trending(page, period)     — Trending songs ('week'/'day'/'')
+- suno_api_get_song(song_id)              — Full song details by ID
+- suno_api_search(query, type, page)      — Search songs/users/playlists
+- suno_api_get_playlist(playlist_id)      — Get playlist contents
+- suno_api_get_subscription_plans()       — All plan prices & features
+- suno_api_get_contests()                 — Active contests
+
+LIBRARY (requires auth):
+- suno_api_get_my_songs(page)                           — Your generated songs
+- suno_api_get_my_playlists()                           — Your playlists
+- suno_api_get_liked_songs(page)                        — Songs you liked
+- suno_api_like_song(song_id)                           — Like a song
+- suno_api_delete_song(song_id)                         — Move to trash
+- suno_api_make_public(song_id)                         — Publish a song
+- suno_api_create_playlist(name, description)           — New playlist
+- suno_api_add_to_playlist(playlist_id, song_id)        — Add to playlist
+- suno_api_remove_from_playlist(playlist_id, song_id)   — Remove from playlist
+- suno_api_update_playlist(playlist_id, name, ...)      — Rename/update playlist
+
+DOWNLOADS:
+- suno_api_wait_for_song(song_id, timeout)              — Wait for generation, get audio URL
+- suno_api_download_song(song_id, output_dir)           — Download MP3 + cover art
+- suno_api_download_playlist(playlist_id, output_dir)   — Download entire playlist
+- suno_api_download_my_songs(output_dir, page)          — Batch download your library
+
+GENERATION (requires auth, credits):
+- `suno_api_generate(prompt, tags, title, make_instrumental, model)` — Create new song
+- `suno_api_extend(song_id, prompt, tags, continue_at, model)` — Extend a song
+- `suno_api_remix(song_id, prompt, tags, title, model)` — Remix a song
+- `suno_api_inpaint(song_id, start_s, end_s, prompt, tags)` — Edit a section
+
+━━━ BROWSER TOOLS (Legacy — use API tools instead) ━━━
+- `suno_open_browser(headless)` — Start Playwright browser
+- `suno_login(email, password)` — Authenticate via browser
+- `suno_generate_track(prompt, style, lyrics, duration)` — Browser-based generation
+- `suno_download_track(track_id, path, include_stems)` — Download files
+- `suno_get_status()` — Browser session status
+- `suno_close_browser()` — Close browser
+
+━━━ SERVER TOOLS ━━━
+- `help(level)` — This help (levels: 'basic', 'detailed', 'api', 'examples')
+- `get_server_status()` — Server and browser health check
+"""
+    elif level == "api":
+        return """
+🎵 **API Tools Setup Guide**
+
+**Authentication (one-time setup):**
+```
+# Option 1: Cookie (recommended)
+# 1. Open suno.com, log in
+# 2. DevTools (F12) → Application → Cookies → suno.com
+# 3. Copy __session value
+SUNO_COOKIE=__session=eyJhbGciO...
+
+# Option 2: Direct token
+SUNO_AUTH_TOKEN=eyJhbGciO...
+```
+
+**API Endpoints Discovered (studio-api.prod.suno.com):**
+PUBLIC:
+  GET  /api/trending/?page=0[&period=week|day]
+  GET  /api/clip/{id}
+  POST /api/search/
+  GET  /api/playlist/{id}?page=0
+  GET  /api/billing/usage-plans
+  GET  /api/contests/
+
+AUTHENTICATED:
+  GET  /api/session/
+  GET  /api/billing/credits/
+  GET  /api/billing/info/
+  GET  /api/feed/?page=0
+  GET  /api/prompts/?filter_prompt_type=lyrics|tags
+  POST /api/generate/v2/
+  POST /api/inpaint/
+  POST /api/extend/
+
+**Generate request body:**
+```json
+{
+  "prompt": "lyrics or description",
+  "tags": "genre, style, instruments",
+  "title": "Song Title",
+  "make_instrumental": false,
+  "mv": "chirp-v4"
+}
+```
 """
     elif level == "examples":
         return """
-🎵 **Suno MCP Server - Usage Examples**
+🎵 **Usage Examples**
 
-**Basic Music Generation:**
+**Discover Music (no auth needed):**
 ```
-# Generate a simple track
-suno_generate_track("upbeat pop song about summer", "pop")
+# Browse trending
+suno_api_get_trending()
+suno_api_get_trending(period="week")
 
-# Generate with lyrics
-suno_generate_track("ballad", "folk", "Verse lyrics here...")
+# Search for songs
+suno_api_search("dark ambient synthwave")
+suno_api_search("johndoe", search_type="user")
 
-# Download completed track
-suno_download_track("track_123", "downloads/", true)
-```
-
-**Studio Production:**
-```
-# Create new project
-studio_create_project("My Album", "pop", 128, "C")
-
-# Generate drum stem
-studio_generate_stem("energetic rock drums", "drums", 0, 32)
-
-# Mix the track
-studio_adjust_volume("stem_456", 75, 2, 3)
+# Get song details
+suno_api_get_song("b3142399-f73e-4fc7-b5da-738cf6957e6f")
 ```
 
-**Workflow Automation:**
+**Generate Music (auth required):**
 ```
-# Complete production pipeline
-studio_open()
-studio_create_project("AutoMix", "electronic", 140, "D")
-studio_generate_stem("deep bassline", "bass")
-studio_generate_stem("synth lead", "synth")
-studio_set_bpm(142)
-studio_export_project("wav", "high", true)
+# Simple generation (auto mode)
+suno_api_generate(
+    "A melancholic lo-fi hip hop beat for studying",
+    tags="lo-fi, hip hop, rain, chill"
+)
+
+# Custom lyrics mode
+suno_api_generate(
+    "[Verse]\\nIn the city lights I roam\\n[Chorus]\\nNeon dreams take me home",
+    tags="synthwave, 80s, electronic, female vocals",
+    title="Neon Dreams"
+)
+
+# Instrumental
+suno_api_generate(
+    "Epic orchestral battle theme",
+    tags="orchestral, epic, dramatic, cinematic",
+    make_instrumental=True
+)
+```
+
+**Edit Existing Songs (auth required):**
+```
+# Extend a song
+suno_api_extend("song-id-here", continue_at=0.0)
+
+# Remix with new style
+suno_api_remix("song-id-here", "jazz piano version", tags="jazz, piano, acoustic")
+
+# Fix a section (30s to 60s)
+suno_api_inpaint("song-id-here", 30.0, 60.0, "[Bridge]\\nNew bridge lyrics")
+```
+
+**Manage Library (auth required):**
+```
+suno_api_get_my_songs()
+suno_api_get_liked_songs()
+suno_api_like_song("song-id")
+suno_api_make_public("song-id")
+suno_api_create_playlist("My Synthwave Mix")
+suno_api_remove_from_playlist("playlist-id", "song-id")
+suno_api_update_playlist("playlist-id", name="New Name")
+```
+
+**Download Music:**
+```
+suno_api_wait_for_song("song-id")
+suno_api_download_song("song-id")
+suno_api_download_song("song-id", output_dir="C:/Music/Suno")
+suno_api_download_playlist("playlist-id")
+suno_api_download_my_songs(max_songs=20)
 ```
 """
     else:
-        return "Use `help()` for basic help, `help('detailed')` for comprehensive documentation, or `help('examples')` for usage examples."
+        return "Use `help()` for basic, `help('detailed')` for all tools, `help('api')` for API reference, `help('examples')` for code examples."
 
 
 # FastMCP 2.12 Standard: Status Tool

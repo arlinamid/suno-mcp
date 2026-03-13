@@ -1,7 +1,7 @@
 # Suno-MCP
 
 **Model Context Protocol server for Suno AI music generation.**  
-Full API integration with v5 model support, secure session management, advanced generation parameters, and library management — all controllable from Claude Desktop or any MCP client.
+Full API integration with v5 model support, secure session management, advanced generation parameters, library management, reusable prompt workflows, and live contextual resources — all controllable from Claude Desktop, Cursor, or any MCP client.
 
 > Forked from [sandraschi/suno-mcp](https://github.com/sandraschi/suno-mcp) and significantly extended by [@arlinamid](https://github.com/arlinamid).
 
@@ -12,6 +12,8 @@ Full API integration with v5 model support, secure session management, advanced 
 - **Login once** — credentials and session cookies are stored securely (OS keyring + DPAPI/Fernet encryption)
 - **Generate music** — v5 (chirp-crow), v4.5x, v4.5, v4, v3.5 model support with full advanced options
 - **Advanced mode** — separate lyrics & style prompts, vocal gender, weirdness, style influence, negative tags
+- **Guided workflows** — 4 built-in MCP Prompts walk the model through song composition, inspiration finding, remixing, and playlist creation
+- **Live context** — 6 MCP Resources expose models, style tags, prompt guide, credits, trending, and your library as readable context
 - **Manage your library** — browse songs, playlists, liked songs; create/edit playlists
 - **Download** — save MP3/artwork files from your library or directly by song ID
 - **Auto session refresh** — Clerk JWT tokens are refreshed automatically before they expire
@@ -103,23 +105,58 @@ A browser window will open — log in to Suno normally. The session (including H
 
 ---
 
-## Example Usage (Claude Desktop)
+## Example Usage (Claude Desktop / Cursor)
 
 ```
 "Generate a dark synthwave track with female vocals about neon rain"
 
 "Create a song titled 'Mountain Dawn' — acoustic folk, male voice, weirdness 30"
 
+"Use the compose_song prompt to write a Hungarian folk song about autumn"
+
+"Find inspiration in today's trending songs and propose a new concept"
+
+"Remix song <id> as a jazz version, keep the melody"
+
 "Show me my Suno library"
 
 "Download song <id> to D:\Music"
 
 "Create a playlist called 'Chill Vibes' and add song <id>"
+
+"Read suno://prompt-guide"
+
+"What credits do I have left? (suno://credits)"
 ```
 
 ---
 
 ## Tools Reference
+
+### MCP Prompts
+
+Reusable prompt templates that guide the AI model through complete Suno workflows.
+Invoke with natural language: *"Use the compose_song prompt for a jazz song about rain"*
+
+| Prompt | Parameters | Description |
+|--------|-----------|-------------|
+| `compose_song` | `theme`, `genre`, `mood`, `language`, `structure` | Full song composition: writes style field + lyrics with v5 meta-tags, picks parameters, calls `suno_api_generate` |
+| `find_inspiration` | `genre`, `period` | Fetches trending songs, analyses patterns, proposes an original concept |
+| `remix_track` | `song_id`, `direction`, `preserve` | Inspects original metadata then remixes with a new creative direction |
+| `create_playlist` | `name`, `description`, `song_ids` | Creates a playlist and populates it from the library |
+
+### MCP Resources
+
+Live and static contextual data readable by any MCP client (`resources/read`).
+
+| URI | Type | Content |
+|-----|------|---------|
+| `suno://models` | static | All model aliases with API names and use cases |
+| `suno://style-tags` | static | Curated tag catalogue by genre, mood, vocal style, production, BPM, key |
+| `suno://prompt-guide` | static | v5 prompting master reference: two-field model, all tag categories, anchor technique, 6–12 syllable rule, common issues & fixes |
+| `suno://credits` | live | Current credit balance and subscription plan |
+| `suno://trending` | live | Top trending songs feed |
+| `suno://my-library` | live | Your personal song library (page 0) |
 
 ### Session & Authentication
 
@@ -138,7 +175,7 @@ A browser window will open — log in to Suno normally. The session (including H
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
-| `suno_api_generate` | Generate a new song (2 variations) | `prompt`, `tags`, `title`, `model`, `vocal_gender`, `weirdness`, `style_weight`, `negative_tags`, `make_instrumental` |
+| `suno_api_generate` | Generate a new song (2 variations) | `prompt`, `tags`, `title`, `model`, `vocal_gender`, `weirdness`, `style_weight`, `negative_tags`, `make_instrumental`, `persona_id`, `inspo_clip_id` |
 | `suno_api_extend` | Extend an existing song | `song_id`, `prompt`, `continue_at` |
 | `suno_api_remix` | Remix a song with new style | `song_id`, `tags`, `prompt` |
 | `suno_api_inpaint` | Replace a section of a song | `song_id`, `prompt`, `start_s`, `end_s` |
@@ -305,4 +342,5 @@ MIT License — see [LICENSE](LICENSE)
 
 **Fork of**: [sandraschi/suno-mcp](https://github.com/sandraschi/suno-mcp)  
 **Extended by**: [@arlinamid](https://github.com/arlinamid)  
-**Last updated**: 2026-03-12
+**Version**: 2.1.0  
+**Last updated**: 2026-03-13

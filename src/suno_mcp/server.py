@@ -29,7 +29,7 @@ class ToolRequest(BaseModel):
 class HealthResponse(BaseModel):
     """Health check response model."""
     status: str = "ok"
-    version: str = "1.0.0"
+    version: str = "2.1.0"
     uptime: float
     tools_loaded: int
 
@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
 fastapi_app = FastAPI(
     title="Suno MCP Server",
     description="Automated Suno AI Music Generation MCP Server",
-    version="1.0.0",
+    version="2.1.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -88,12 +88,12 @@ fastapi_app.add_middleware(
 async def health_check():
     """Health check endpoint returning JSON status."""
     import time
-    start_time = getattr(fastapi_app, "start_time", time.time())
+    start_time = getattr(fastapi_app.state, "start_time", time.time())
     current_time = time.time()
 
     return HealthResponse(
         status="ok",
-        version="2.0.0",
+        version="2.1.0",
         uptime=current_time - start_time,
         tools_loaded=53  # 6 browser + 26 API + 3 session + 4 credentials + help
     )
@@ -1496,7 +1496,7 @@ async def get_server_status() -> str:
 🎵 **Suno MCP Server Status**
 
 **Server Configuration:**
-• Version: 1.0.0
+• Version: 2.1.0
 • Mode: Dual Interface (MCP stdio + FastAPI HTTP)
 • Total Tools Available: 23
 • Basic Tools: 6
@@ -1535,10 +1535,590 @@ Error: {str(e)}
 """
 
 
+# ─────────────────────────────────────────────
+# MCP PROMPTS
+# ─────────────────────────────────────────────
+
+@mcp_app.prompt()
+def compose_song(
+    theme: str,
+    genre: str = "pop",
+    mood: str = "upbeat",
+    language: str = "english",
+    structure: str = "verse-chorus",
+) -> str:
+    """
+    Generate a fully-parameterized prompt for composing an original Suno song.
+
+    Guides the model through writing custom lyrics and choosing the right
+    style tags, model version, and advanced generation options so that
+    `suno_api_generate` can be called with all required arguments filled in.
+
+    Args:
+        theme: Core topic or story of the song (e.g. "Budapest 2077, dystopia")
+        genre: Musical genre (e.g. "hip-hop", "synthwave", "folk", "jazz")
+        mood: Emotional tone (e.g. "dark", "euphoric", "melancholic", "aggressive")
+        language: Lyrics language (e.g. "english", "hungarian", "spanish")
+        structure: Song structure shorthand (e.g. "verse-chorus", "AABA", "through-composed")
+    """
+    return f"""You are a professional songwriter and Suno AI v5 prompt engineer.
+
+**Task:** Compose an original song and then call `suno_api_generate` to create it.
+
+**Parameters:**
+- Theme / Story: {theme}
+- Genre: {genre}
+- Mood: {mood}
+- Lyrics language: {language}
+- Song structure: {structure}
+
+---
+
+**Step 1 – Craft the Style Field** (`tags` param, ≤200 chars)
+
+Use this structured format:
+```
+[GENRE: {genre}] [BPM: <estimate>] [Key: <Major/Minor>]
+[Mood: {mood}]
+[Instrumentation: <2–3 key instruments>]
+[Vocal Style: <male/female, delivery type>]
+```
+Rules:
+- **Front-load the most critical terms** (v5 weights first 3–5 tokens most)
+- **Anchor the core vibe at both start AND end** — repeat the genre/mood descriptor at the end
+- 1–2 genres max, no artist names
+- Example end anchor: `"...cinematic, raw and emotional, {genre} energy"`
+
+**Step 2 – Write the Lyrics** (`prompt` param)
+
+Use Suno v5 meta-tags to structure each section:
+```
+[Intro]
+[Mood: {mood}] [Energy: Low→Medium]
+[Instrument: <sparse opening sound>]
+
+[Verse]
+[Vocal Style: <delivery>] [Energy: Building]
+<lyrics — aim for 6–12 syllables per line>
+
+[Pre-Chorus]
+<build tension>
+
+[Chorus]
+[Energy: High] [Vocal Style: Open]
+<hook — most memorable lines> (crowd adlib: yeah!)
+
+[Bridge]
+[Texture: Tape-Saturated] [Callback: continue with same vibe as chorus]
+<emotional contrast>
+
+[Breakdown: spoken, no drums]
+<spoken word or whisper moment>
+
+[Outro: fade, sparse instrumentation, Callback: Intro melody]
+<final lines>
+```
+
+**Lyric rules for v5:**
+- 6–12 syllables per line for clean vocal alignment
+- Use `(yeah!)` / `(hé!)` adlibs in chorus for live feel
+- Pronunciation tip: elongate for emphasis — `"loooove"`, `"seen, seen!"`
+- Write in {language}
+
+**Step 3 – Choose Advanced Options**
+- `model`: "v5" (best quality & control)
+- `vocal_gender`: "male" | "female" | "" (auto)
+- `weirdness`: 0–100 — for {mood} mood, suggest: {"30–50 for grounded styles, 50–70 for experimental" if mood in ["dark", "surreal", "experimental"] else "20–40 for conventional styles"}
+- `style_weight`: 60–80 recommended (strict enough to hold style, flexible enough for creativity)
+- `negative_tags`: list styles that would clash with {genre}/{mood}
+
+**Step 4 – Generate**
+```python
+suno_api_generate(
+    prompt="<full lyrics with all section tags>",
+    tags="<style field ≤200 chars>",
+    title="<song title>",
+    model="v5",
+    vocal_gender="<choice>",
+    weirdness=<0-100>,
+    style_weight=<60-80>,
+    negative_tags="<unwanted styles>"
+)
+```
+Two variations will be generated. After completion, present both with their IDs and audio URLs, then ask the user which to download.
+
+**Common issues to watch for:**
+- If output sounds generic → simplify style tags, front-load harder
+- If vocals are buried → note for user to try stem export
+- If structure feels wrong → tighten section tags, use `[Mood/Energy]` per section
+"""
+
+
+@mcp_app.prompt()
+def find_inspiration(
+    genre: str = "any",
+    period: str = "week",
+) -> str:
+    """
+    Fetch trending Suno songs and distil creative inspiration for a new track.
+
+    First calls `suno_api_get_trending` to get current chart data, then
+    analyses the results and proposes a new original song concept.
+
+    Args:
+        genre: Filter inspiration by genre keyword (e.g. "jazz", "metal", "lo-fi") or "any"
+        period: Trending period — "day", "week", or "" (all-time)
+    """
+    genre_note = f'Filter results mentally for the "{genre}" genre.' if genre != "any" else "Consider all genres."
+    return f"""You are a music A&R scout and creative director.
+
+**Task:** Find trending inspiration on Suno and propose a new original song concept.
+
+**Step 1 – Fetch trending songs**
+Call `suno_api_get_trending(period="{period}", page=0)`.
+{genre_note}
+
+**Step 2 – Analyse the results**
+From the returned song list identify:
+- Dominant genres and sub-genres
+- Recurring moods and energy levels
+- Interesting style tag combinations
+- Titles or lyrical themes that feel fresh
+
+**Step 3 – Propose a concept**
+Based on your analysis, propose ONE original song concept that:
+- Draws inspiration from the trends but avoids copying
+- Has a clear theme, mood, and target audience
+- Includes a working title, 3–5 style tags, and a 2-sentence lyrical premise
+
+**Step 4 – Ask for approval**
+Present the concept and ask: "Should I write full lyrics and generate this song?"
+If yes, switch to the `compose_song` prompt workflow with the concept details.
+"""
+
+
+@mcp_app.prompt()
+def remix_track(
+    song_id: str,
+    direction: str = "different genre",
+    preserve: str = "melody",
+) -> str:
+    """
+    Remix an existing Suno song in a new style or direction.
+
+    Fetches the original song's metadata, then calls `suno_api_remix` with
+    a new creative direction while respecting what should be preserved.
+
+    Args:
+        song_id: UUID of the song to remix
+        direction: Creative direction for the remix (e.g. "jazz version", "darker mood", "acoustic")
+        preserve: What to keep from the original (e.g. "melody", "lyrics", "structure", "nothing")
+    """
+    return f"""You are a music producer specialising in creative remixes.
+
+**Task:** Remix song `{song_id}` in the direction: "{direction}"
+**Preserve from original:** {preserve}
+
+**Step 1 – Inspect the original**
+Call `suno_api_get_song(song_id="{song_id}")` and note:
+- Title, tags, duration, model version
+- Lyrics (if visible in the response)
+- Overall style and mood
+
+**Step 2 – Plan the remix**
+Decide:
+- New style tags that reflect "{direction}"
+- What prompt/lyrics changes are needed (keep {preserve}, change the rest)
+- Whether to increase weirdness or change vocal gender
+- Negative tags to steer away from the original style
+
+**Step 3 – Execute the remix**
+Call:
+```
+suno_api_remix(
+    song_id="{song_id}",
+    prompt="<updated lyrics or style description>",
+    tags="<new style tags>",
+    title="<Original Title> ({direction} remix)",
+    model="v5"
+)
+```
+
+**Step 4 – Present results**
+Share both new variation IDs, ask the user which to keep, then optionally download.
+"""
+
+
+@mcp_app.prompt()
+def create_playlist(
+    name: str,
+    description: str = "",
+    song_ids: str = "",
+) -> str:
+    """
+    Create a named playlist and populate it with songs from the user's library.
+
+    Guides through `suno_api_create_playlist` and `suno_api_add_to_playlist`
+    with an optional batch add from a comma-separated list of song IDs.
+
+    Args:
+        name: Playlist name
+        description: Short description of the playlist theme
+        song_ids: Comma-separated song UUIDs to add (leave empty to choose interactively)
+    """
+    ids_note = (
+        f"Pre-selected song IDs to add: {song_ids}"
+        if song_ids.strip()
+        else "No songs pre-selected — browse the library first."
+    )
+    return f"""You are a Suno library manager.
+
+**Task:** Create a new playlist called "{name}" and populate it with songs.
+**Description:** {description or "(none provided)"}
+**{ids_note}**
+
+**Step 1 – Create the playlist**
+Call:
+```
+suno_api_create_playlist(name="{name}", description="{description}")
+```
+Note the returned `playlist_id`.
+
+**Step 2 – Browse library (if no songs pre-selected)**
+If no songs were pre-selected, call `suno_api_get_my_songs(page=0)` and present
+the list to the user. Ask them to pick songs by ID or title.
+
+**Step 3 – Add songs**
+For each chosen song_id call:
+```
+suno_api_add_to_playlist(playlist_id="<id from Step 1>", song_id="<chosen id>")
+```
+
+**Step 4 – Confirm**
+Report the final playlist contents and share its ID for future reference.
+"""
+
+
+# ─────────────────────────────────────────────
+# MCP RESOURCES
+# ─────────────────────────────────────────────
+
+@mcp_app.resource("suno://models")
+def resource_models() -> str:
+    """
+    Available Suno AI model versions with capabilities and recommended use cases.
+
+    Returns a structured reference of all supported model aliases so the agent
+    can choose the right model for each generation task.
+    """
+    return """# Suno AI Models
+
+| Alias   | API name        | Best for                              |
+|---------|-----------------|---------------------------------------|
+| v5      | chirp-crow      | Best quality & control (DEFAULT)      |
+| v4.5x   | chirp-bluejay   | Advanced creation methods             |
+| v4.5    | chirp-auk       | Intelligent auto-prompts              |
+| v4.5-all| chirp-v4-5      | Best free-plan model                  |
+| v4      | chirp-v4        | Improved sound quality                |
+| v3.5    | chirp-v3-5      | Classic Suno sound                    |
+| v3      | chirp-v3        | Basic / fast generation               |
+
+## v5 (chirp-crow) — Recommended
+- Full custom lyrics with section meta-tags
+- Advanced parameters: weirdness, style_weight, negative_tags, vocal_gender
+- Persona and Inspo clip support
+- Best adherence to structural prompts ([Verse], [Chorus], [Bridge] …)
+
+## Generation cost
+Each `suno_api_generate()` call produces **2 variations** and costs **20 credits**.
+"""
+
+
+@mcp_app.resource("suno://style-tags")
+def resource_style_tags() -> str:
+    """
+    Curated library of Suno style tags organised by genre, mood, and production element.
+
+    Use these tags in the `tags` parameter of `suno_api_generate` to shape the
+    musical style of generated tracks precisely.
+    """
+    return """# Suno Style Tags Reference
+
+## Genre
+acoustic, ambient, blues, boom-bap, classical, country, dark-pop, disco,
+drum-and-bass, dubstep, edm, electronic, folk, funk, gospel, hip-hop,
+house, indie, jazz, lo-fi, metal, pop, punk, r&b, rap, reggae, rock,
+soul, synthwave, techno, trap, world
+
+## Mood / Energy
+aggressive, anthemic, atmospheric, brooding, catchy, cinematic, dark,
+dreamy, emotional, energetic, epic, euphoric, groovy, haunting, heavy,
+hypnotic, intense, melancholic, mellow, mysterious, nostalgic, peaceful,
+playful, powerful, raw, relaxing, romantic, sad, satirical, surreal,
+tense, triumphant, upbeat
+
+## Vocal Style
+auto-tune, choir, falsetto, female-vocals, gritty, harmonies, male-vocals,
+operatic, rap, scream, spoken-word, whisper, yodel
+
+## Production / Instruments
+808-bass, acoustic-guitar, arpeggiated-synth, bass-guitar, brass,
+claps, distorted-guitar, drum-machine, electric-guitar, flute,
+glockenspiel, hi-hats, horn, keys, orchestra, piano, saxophone,
+shakers, snare, strings, synth-pad, trumpet, ukulele, vinyl-crackle,
+violin
+
+## BPM / Tempo
+60 BPM, 80 BPM, 90 BPM, 100 BPM, 120 BPM, 130 BPM, 140 BPM, 160 BPM
+
+## Key
+major key, minor key, dorian mode, phrygian mode, lydian mode
+"""
+
+
+@mcp_app.resource("suno://prompt-guide")
+def resource_prompt_guide() -> str:
+    """
+    Suno v5 prompting master reference: meta-tags, structure, style fields, and advanced techniques.
+
+    Synthesises the Jack Righteous v5 Training Series, the Suno v5 PDF guide, and
+    LitMedia best practices into a single actionable reference for writing prompts
+    that produce high-quality, well-structured songs with Suno's v5 model.
+    """
+    return """# Suno v5 Prompting Master Guide
+
+## Two Separate Input Fields
+Suno has **two independent fields** — use them differently:
+
+| Field | Purpose | Limit |
+|-------|---------|-------|
+| **Style / Tags** (`tags` param) | Genre, mood, BPM, key, production style — NO lyrics | ~200 chars |
+| **Lyrics / Prompt** (`prompt` param) | Full lyrics with section meta-tags — the creative content | No hard limit |
+
+---
+
+## Style Field — Best Practices (≤200 chars)
+
+### Structured format (recommended)
+```
+[GENRE: Synthwave, Retro 80s] [BPM: 110] [Key: A Minor]
+[Mood: Nostalgic, Futuristic]
+[Instrumentation: Analog Synths, Deep Bass, Reverb-heavy Drums]
+```
+
+### Rules
+1. **Front-load the most critical terms** — v5 weights the first 3–5 items most heavily
+2. **Anchor key descriptors at START and END** — repeat the core vibe at both ends to lock it in
+   - Good: `"Cinematic outlaw country, bluesy pedal steel, raw and emotional... cinematic southern soul"`
+3. **1–2 genres max** — stacking 3+ confuses the model; use one genre + one modifier
+4. **6–10 style tokens** — too few = generic, too many = incoherent
+5. **Avoid artist/song names** — describe style instead
+   - Bad: `"like Coldplay"` → Good: `"anthemic indie pop, atmospheric synths, emotional male vocals, 103 BPM"`
+
+---
+
+## Lyrics Field — Meta-tag System (v5)
+
+### Structure Tags — song architecture
+```
+[Intro]              Opening, sets atmosphere (calm/sparse)
+[Verse]              Narrative, storytelling
+[Pre-Chorus]         Build tension before the hook
+[Chorus]             Main hook — most repeated section
+[Bridge]             Contrast, emotional shift
+[Breakdown]          Drop energy, spoken word or sparse
+[Instrumental Break] Pure music, no vocals
+[Outro]              Fade or final statement
+```
+
+### Mood & Energy Tags — emotional arc
+```
+[Mood: Uplifting]        [Mood: Melancholic]     [Mood: Haunting]
+[Energy: Low→High]       [Energy: High]          [Energy: Medium]
+```
+Place mood tags in the **first 3 lines** and before choruses for maximum impact.
+
+### Instrument Tags — timbre control
+```
+[Instrument: Warm Rhodes]        [Instrument: Analog Synths]
+[Instrument: Muted Trumpet]      [Instrument: 808 Bass]
+[Instrument: Bright Electric Guitars, Live Drums]
+```
+v5 manifests these with **audible separation** — more reliable than just listing in style field.
+
+### Vocal Tags — delivery and effects
+```
+[Vocal Style: Whisper]           [Vocal Style: Power Praise]
+[Vocal Style: Open, Confident]   [Vocal Style: Gritty]
+[Vocal Effect: Natural Reverb]   [Vocal Effect: AutoTune]
+```
+Pair with a **Persona** (`persona_id`) for consistent voice across sections.
+
+### Texture Tags — production feel
+```
+[Texture: Tape-Saturated]        [Texture: Vinyl Hiss]
+[Texture: Lo-fi Filter]          [Texture: Gentle Sidechain]
+```
+
+### Callback Tag — extend chain coherence
+```
+[Callback: continue with same vibe as chorus]
+[Callback: Intro orchestral melody returns]
+```
+Re-inject every 1–2 extends to prevent style drift.
+
+### Timed / Dynamic Tags — specific transitions
+```
+[Solo: 12s sax swell]
+[Bridge: 15s soaring accordion solo]
+[Break: distorted bass drop]
+[Drop: aggressive build]
+```
+
+### Inline hints inside section tags
+```
+[Chorus – sung, crowd adlibs]
+[Breakdown: drums drop, single piano, whisper]
+[Verse – fast rap, internal rhymes]
+[Outro: fade, sparse strings, callback melody]
+[Bridge: Tape-Saturated] [Callback: continue with same vibe as chorus]
+```
+
+---
+
+## v5 Complete Example
+
+**Style field:**
+```
+Hungarian political rap, boom bap, 94 BPM, minor key, male vocals,
+dark piano loop, 808 bass, vinyl crackle, cinematic
+```
+
+**Lyrics field:**
+```
+[Intro]
+[Mood: Dark, Tense] [Energy: Low]
+[Instrument: Sparse Piano, Vinyl Crackle]
+
+[Verse]
+[Vocal Style: Gritty] [Energy: Building]
+six syllable lines work well
+keep it tight, keep it real
+
+[Chorus]
+[Energy: High] [Vocal Style: Open, Crowd Adlibs]
+hook line one here
+hook line two here (yeah!)
+
+[Bridge]
+[Texture: Tape-Saturated] [Callback: continue with same vibe as chorus]
+contrast moment — shift the mood
+
+[Outro: fade, sparse piano, Callback: Intro melody]
+```
+
+---
+
+## Advanced Parameters (`suno_api_generate`)
+| Parameter     | Range   | Effect |
+|---------------|---------|--------|
+| `weirdness`   | 0–100   | 0 = conventional · 100 = avant-garde experimental |
+| `style_weight`| 0–100   | How strictly style tags are enforced |
+| `vocal_gender`| m/f/""  | Force gender or let model decide |
+| `negative_tags` | string | Styles to explicitly suppress |
+
+---
+
+## Lyric Writing Rules for v5
+
+1. **6–12 syllables per line** — v5 tracks well within this range; longer lines misalign
+2. **Pronunciation tweaks** — elongate vowels for emphasis: `"loooove"`, `"seen, seen!"`
+3. **Energy arc** — Intro (calm) → Verses (build) → Chorus (peak) → Bridge (shift) → Final Chorus (biggest)
+4. **Crowd adlibs** — `(yeah!)`, `(hé!)`, `(na!)` in chorus lines for live feel
+5. **Narrative prompts** — v5 responds well to full sentences describing arc:
+   - `"Start with ambient layers, build to hypnotic groove with warm synths"`
+
+---
+
+## Common Issues & Fixes
+
+| Problem | Fix |
+|---------|-----|
+| Ignored tags / generic output | Simplify to 1–2 genres; front-load key tags |
+| Repetitive sections | Add `"variation/dynamic"` cue or use Replace on that section |
+| Artifacts (hiss/shimmer) | Remaster → Subtle first; High only for variety |
+| Vocals buried in mix | Export stems and rebalance; or Replace chorus with clearer Persona |
+| Style drift on long Extend chains | Re-inject genre/mood + add `[Callback: ...]` every 1–2 extends |
+| Prompt overload | Move details to lyrics field; keep style field ≤200 chars |
+
+---
+
+## Persona & Inspo
+- **Persona** (`persona_id`): Consistent vocal character (Whisper Soul, Power Praise, Retro Diva…)
+  - Pair with `[Vocal Style: X]` tag in lyrics for best results
+- **Inspo** (`inspo_clip_id`): Existing song as stylistic reference
+  - Trim with `inspo_start_s` / `inspo_end_s` to reference a specific section only
+
+---
+
+## Loop-Friendly Tracks
+Include `"loop-friendly"` in the style field + `[Texture: seamless loop]` in lyrics.
+After generation: use Crop/Fade → Remaster (Subtle) for clean loops.
+
+---
+*Sources: Jack Righteous v5 Training Series (Oct 2025), Suno v5 PDF Guide, LitMedia Suno Prompts Guide*
+"""
+
+
+@mcp_app.resource("suno://credits")
+async def resource_credits() -> str:
+    """
+    Live credit balance and subscription plan for the authenticated Suno account.
+
+    Fetches real-time data from the Suno API. Requires authentication
+    (run `suno_browser_login` or `suno_save_cookie` first).
+    """
+    try:
+        result = await api_tools.get_credits()
+        return f"# Suno Credits\n\n{result}"
+    except Exception as e:
+        return f"# Suno Credits\n\nUnable to fetch credits: {e}\n\nRun `suno_browser_login` to authenticate first."
+
+
+@mcp_app.resource("suno://trending")
+async def resource_trending() -> str:
+    """
+    Current all-time trending songs on Suno (public, no auth required).
+
+    Returns the top ~20 trending tracks with titles, tags, play counts,
+    and audio URLs — useful for inspiration and style reference.
+    """
+    try:
+        result = await api_tools.get_trending_songs(page=0, period="")
+        return f"# Suno Trending Songs\n\n{result}"
+    except Exception as e:
+        return f"# Suno Trending Songs\n\nUnable to fetch trending: {e}"
+
+
+@mcp_app.resource("suno://my-library")
+async def resource_my_library() -> str:
+    """
+    First page of the authenticated user's personal Suno song library.
+
+    Shows all songs you have generated including status, IDs, titles,
+    tags, duration, and audio URLs. Requires authentication.
+    """
+    try:
+        result = await api_tools.get_my_songs(page=0)
+        return f"# My Suno Library\n\n{result}"
+    except Exception as e:
+        return f"# My Suno Library\n\nUnable to fetch library: {e}\n\nRun `suno_browser_login` to authenticate first."
+
+
 def main():
     """Main entry point for MCP server (stdio mode)."""
     logging.info("Starting Suno MCP server (stdio mode)")
-    asyncio.run(mcp_app.run())
+    mcp_app.run()
 
 
 def main_api():
@@ -1547,7 +2127,7 @@ def main_api():
     import uvicorn
 
     # Store start time for uptime calculation
-    fastapi_app.start_time = time.time()
+    fastapi_app.state.start_time = time.time()
 
     logging.info("Starting FastAPI server on http://0.0.0.0:3000")
     logging.info("API Docs: http://0.0.0.0:3000/api/docs")

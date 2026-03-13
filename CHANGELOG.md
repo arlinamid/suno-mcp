@@ -10,6 +10,50 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.1.0] — 2026-03-13
+
+Feature release adding MCP Prompts and Resources, a major prompt-guide upgrade, and two type-error bug fixes.
+
+### Added
+
+#### MCP Prompts (`@mcp_app.prompt()`)
+Four reusable prompt templates that guide an LLM through complete Suno workflows:
+- **`compose_song`** — Full song composition workflow: writes style field (≤200 chars, anchor technique), structures lyrics with v5 meta-tags (`[Mood]`, `[Energy]`, `[Instrument]`, `[Texture]`, `[Callback]`), picks advanced parameters, and calls `suno_api_generate`. Params: `theme`, `genre`, `mood`, `language`, `structure`
+- **`find_inspiration`** — Fetches trending songs, analyses dominant genres/moods, and proposes an original song concept. Params: `genre`, `period`
+- **`remix_track`** — Inspects an existing song's metadata then calls `suno_api_remix` with a new creative direction. Params: `song_id`, `direction`, `preserve`
+- **`create_playlist`** — Creates a named playlist and populates it from the library. Params: `name`, `description`, `song_ids`
+
+#### MCP Resources (`@mcp_app.resource()`)
+Six contextual data sources accessible to any MCP client:
+
+| URI | Type | Content |
+|-----|------|---------|
+| `suno://models` | static | All model aliases with API names and use cases |
+| `suno://style-tags` | static | Curated tag catalogue: genre, mood, vocal, production, BPM, key |
+| `suno://prompt-guide` | static | v5 prompting master reference (see below) |
+| `suno://credits` | live API | Current credit balance and subscription plan |
+| `suno://trending` | live API | Top trending songs feed |
+| `suno://my-library` | live API | User's personal song library (page 0) |
+
+#### `suno://prompt-guide` — major content upgrade
+Completely rewritten, synthesising the *Jack Righteous v5 Training Series* (Oct 2025), the *Suno v5 PDF Guide*, and *LitMedia Suno Prompts Guide*:
+- **Two-field model** — style field (≤200 chars) vs lyrics field, both explained with rules
+- **Anchor descriptor technique** — repeat the core vibe at the start AND end of the style field
+- **Full tag taxonomy**: `[Mood: X]`, `[Energy: X]`, `[Instrument: X]`, `[Texture: X]`, `[Vocal Style: X]`, `[Vocal Effect: X]`, `[Callback: ...]`, timed tags (`[Solo: 12s sax swell]`)
+- **Lyric writing rules**: 6–12 syllables/line, pronunciation tweaks, crowd adlibs
+- **Common issues & fixes table**: ignored tags, repetition, artifacts, buried vocals, extend drift
+- **Loop-friendly track guide**
+
+### Fixed
+- `asyncio.run(mcp_app.run())` → `mcp_app.run()` — FastMCP `.run()` is synchronous; wrapping in `asyncio.run()` passed `None` to the coroutine parameter
+- `fastapi_app.start_time` → `fastapi_app.state.start_time` — FastAPI does not allow arbitrary attribute assignment on the app object; `state` is the correct slot
+
+### Changed
+- Version bumped `1.0.0` → `2.1.0` in `pyproject.toml`, `server.py` (HealthResponse, FastAPI init, health endpoint, status tool)
+- `compose_song` prompt updated with v5-specific guidance: front-loading, anchor repeat, syllable count, per-section energy/instrument tags, common issue hints
+
+---
+
 ## [2.0.0] — 2026-03-12
 
 Complete rewrite of the generation engine and a major feature expansion on top of the original browser-automation-only implementation.
@@ -112,6 +156,7 @@ Original implementation by [@sandraschi](https://github.com/sandraschi).
 
 ---
 
-[Unreleased]: https://github.com/arlinamid/suno-mcp/compare/v1.0.0...HEAD  
-[2.0.0]: https://github.com/arlinamid/suno-mcp/releases/tag/v2.0.0  
+[Unreleased]: https://github.com/arlinamid/suno-mcp/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/arlinamid/suno-mcp/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/arlinamid/suno-mcp/releases/tag/v2.0.0
 [1.0.0]: https://github.com/sandraschi/suno-mcp/releases/tag/v1.0.0

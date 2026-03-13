@@ -240,7 +240,7 @@ def generate(
             tags=tags,
             title=title,
             model=model,
-            vocal_gender=vocal_gender or None,
+            vocal_gender=vocal_gender,
             weirdness=weirdness,
             style_weight=style_weight,
             negative_tags=negative_tags,

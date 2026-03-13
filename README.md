@@ -141,47 +141,61 @@ After `pip install -e .` the `suno` command is available directly:
 
 ```bash
 # Auth
-suno login                          # browser login, saves session to keychain
-suno status                         # session expiry + credit balance
-suno refresh --force                # force-refresh the JWT token
-suno clear-auth                     # delete all stored credentials
+suno login                           # browser login, saves session to keychain
+suno check-auth                      # verify the session token is valid
+suno status                          # session expiry + credit balance
+suno refresh --force                 # force-refresh the JWT token
+suno save-cookie "__session=eyJ..."  # manual: save cookie from DevTools
+suno save-token "eyJhbGci..."        # manual: save raw JWT bearer token
+suno cred-status                     # show stored credential fingerprints
+suno clear-auth                      # delete all stored credentials
 
 # Generate
 suno generate "my prompt here" --tags "synthwave, female vocals" --wait
 suno generate "[Verse]\nLine one\n[Chorus]\nHook" --title "Night Drive" --model v5 --download ~/Music
-suno wait <song-id>                 # poll until audio is ready
+suno generate "dark electro" --persona <uuid> --inspo <song-id>  # persona + inspiration
+suno wait <song-id>                  # poll until audio is ready
 suno extend <song-id> --prompt "bridge lyrics" --at 60
 suno remix <song-id> "jazz version" --tags "jazz, piano"
+suno inpaint <song-id> 30 60 "guitar solo" --tags "rock"  # replace section 30s-60s
 suno lyrics "melancholy lighthouse keeper in winter"
 
 # Library & Discovery
-suno songs                          # your library (page 0)
+suno songs                           # your library (page 0)
 suno songs --page 1
 suno song <id>
 suno trending --period week
 suno search "dark ambient"
 suno liked
+suno alignment <song-id>             # word-level lyric timestamps (karaoke)
+
+# Personas
+suno persona <uuid>                  # fetch persona details and clips
+suno my-personas                     # your created personas (Pro)
+suno featured-personas               # Suno's curated personas
 
 # Playlists
 suno playlists
 suno playlist <playlist-id>
 suno playlist-create "Chill Vibes" --desc "Late night sessions"
+suno playlist-update <playlist-id> --name "New Name" --public
 suno playlist-add <playlist-id> <song-id>
 suno playlist-remove <playlist-id> <song-id>
 
 # Download
-suno download <song-id>             # MP3 + cover to ~/Music/suno-downloads/
+suno download <song-id>              # MP3 + cover to ~/Music/suno-downloads/
 suno download <song-id> --output D:\Music --no-cover
 suno download-playlist <playlist-id> --output ~/Music/playlists
-suno download-library --max 40      # bulk download personal library
+suno download-library --max 40       # bulk download personal library
 
 # Account
 suno credits
+suno billing
 suno plans
 suno contests
 
 # Advanced
-suno stems <song-id>                # split into stems (Premier)
+suno stems <song-id>                 # split into stems (Premier)
 suno concat <extension-clip-id>     # merge extension with parent
 
 # Quick reference

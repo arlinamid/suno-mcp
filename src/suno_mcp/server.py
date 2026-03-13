@@ -29,7 +29,7 @@ class ToolRequest(BaseModel):
 class HealthResponse(BaseModel):
     """Health check response model."""
     status: str = "ok"
-    version: str = "2.2.0"
+    version: str = "2.2.1"
     uptime: float
     tools_loaded: int
 
@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
 fastapi_app = FastAPI(
     title="Suno MCP Server",
     description="Automated Suno AI Music Generation MCP Server",
-    version="2.2.0",
+    version="2.2.1",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
@@ -93,7 +93,7 @@ async def health_check():
 
     return HealthResponse(
         status="ok",
-        version="2.2.0",
+        version="2.2.1",
         uptime=current_time - start_time,
         tools_loaded=53  # 6 browser + 26 API + 3 session + 4 credentials + help
     )
@@ -1496,7 +1496,7 @@ async def get_server_status() -> str:
 🎵 **Suno MCP Server Status**
 
 **Server Configuration:**
-• Version: 2.2.0
+• Version: 2.2.1
 • Mode: Dual Interface (MCP stdio + FastAPI HTTP)
 • Total Tools Available: 23
 • Basic Tools: 6

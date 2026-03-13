@@ -10,6 +10,63 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.2.1] — 2026-03-13
+
+Patch: full CLI audit — missing commands, wrong method names, linter fix, and doc updates.
+
+### Fixed
+
+#### CLI method name corrections (would have raised `AttributeError` at runtime)
+All 13 incorrect calls replaced with the actual `ApiSunoTools` method names:
+
+| Was | Correct |
+|---|---|
+| `_t().extend_song()` | `_t().api_extend_song()` |
+| `_t().remix_song()` | `_t().api_remix_song()` |
+| `_t().concat_song()` | `_t().api_concat_song()` |
+| `_t().like_song()` | `_t().api_like_song()` |
+| `_t().make_public()` | `_t().api_make_public()` |
+| `_t().delete_song()` | `_t().api_delete_song()` |
+| `_t().add_to_playlist()` | `_t().api_add_to_playlist()` |
+| `_t().remove_from_playlist()` | `_t().api_remove_from_playlist()` |
+| `_t().create_playlist()` | `_t().api_create_playlist()` |
+| `_t().generate_lyrics()` | `_t().api_generate_lyrics()` |
+| `_t().generate_stems()` | `_t().api_generate_stems()` |
+| `_t().search()` | `_t().search_songs()` |
+| `_t().clear_credentials()` | `get_credential_store().clear()` |
+
+#### Type error
+- `vocal_gender=vocal_gender or None` → `vocal_gender=vocal_gender` — `api_generate_track` expects `str`, not `str | None`; the method already filters `""` internally
+
+### Added
+
+#### 11 previously missing CLI commands
+| Command | MCP equivalent |
+|---|---|
+| `check-auth` | `suno_api_check_auth` |
+| `inpaint <id> <start> <end> <prompt>` | `suno_api_inpaint` |
+| `alignment <id>` | `suno_api_get_lyric_alignment` |
+| `persona <id>` | `suno_api_get_persona` |
+| `my-personas` | `suno_api_get_my_personas` |
+| `featured-personas` | `suno_api_get_featured_personas` |
+| `playlist-update <id>` | `suno_api_update_playlist` |
+| `save-cookie` | `suno_save_cookie` (credential store) |
+| `save-token` | `suno_save_token` (credential store) |
+| `cred-status` | `suno_credential_status` (credential store) |
+| `billing` | `get_billing_info` |
+
+#### 4 missing `generate` options
+- `--persona <uuid>` → `persona_id`
+- `--inspo <song-id>` → `inspo_clip_id`
+- `--inspo-start <seconds>` → `inspo_start_s`
+- `--inspo-end <seconds>` → `inspo_end_s`
+
+### Changed
+- README CLI Usage section updated with all new commands and options
+- CHANGELOG links updated to include `v2.2.0` and `v2.2.1`
+
+---
+
 ## [2.2.0] — 2026-03-13
 
 Feature release adding a full-featured terminal CLI (`suno` command).
@@ -195,7 +252,9 @@ Original implementation by [@sandraschi](https://github.com/sandraschi).
 
 ---
 
-[Unreleased]: https://github.com/arlinamid/suno-mcp/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/arlinamid/suno-mcp/compare/v2.2.1...HEAD
+[2.2.1]: https://github.com/arlinamid/suno-mcp/compare/v2.2.0...v2.2.1
+[2.2.0]: https://github.com/arlinamid/suno-mcp/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/arlinamid/suno-mcp/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/arlinamid/suno-mcp/releases/tag/v2.0.0
 [1.0.0]: https://github.com/sandraschi/suno-mcp/releases/tag/v1.0.0

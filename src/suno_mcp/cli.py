@@ -1,5 +1,5 @@
 """
-suno-mcp CLI — interact with Suno AI directly from the terminal.
+suno-mcp CLI -- interact with Suno AI directly from the terminal.
 
 Usage:
     suno login
@@ -7,6 +7,7 @@ Usage:
     suno generate "my lyrics" --tags "synthwave, dark" --title "Night Drive"
     suno songs
     suno download <song-id>
+    suno info
 
 Run `suno --help` or `suno <command> --help` for full option lists.
 """
@@ -27,6 +28,7 @@ from rich.table import Table
 from rich import box
 
 from .tools.api.tools import ApiSunoTools
+from .tools.shared.credentials import get_credential_store
 
 
 def _ensure_utf8() -> None:
@@ -38,7 +40,6 @@ def _ensure_utf8() -> None:
             ctypes.windll.kernel32.SetConsoleCP(65001)  # type: ignore[attr-defined]
         except Exception:
             pass
-        # Reconfigure stdout/stderr to utf-8 if possible (Python 3.11+)
         if hasattr(sys.stdout, "reconfigure"):
             try:
                 sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
@@ -105,8 +106,15 @@ def login(
     them encrypted to your OS keychain. Auto-refresh works for months.
     """
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as p:
-        p.add_task("Opening browser…")
+        p.add_task("Opening browser...")
         result = _run(_t().browser_login(headless=headless, timeout=timeout))
+    console.print(result)
+
+
+@app.command("check-auth")
+def check_auth() -> None:
+    """Verify the current session token is valid and the API is reachable."""
+    result = _run(_t().check_auth())
     console.print(result)
 
 
@@ -138,13 +146,57 @@ def refresh(
     console.print(result)
 
 
+@app.command("save-cookie")
+def save_cookie(
+    cookie: Annotated[str, typer.Argument(help="Cookie string, e.g. __session=eyJhbGci...")],
+) -> None:
+    """
+    Save a Suno session cookie to the OS keychain (manual auth method).
+
+    How to get your cookie:
+      1. Open suno.com in Chrome and log in
+      2. DevTools (F12) > Application > Cookies > suno.com
+      3. Copy the '__session' value
+      4. Run: suno save-cookie "__session=<paste>"
+    """
+    store = get_credential_store()
+    result = store.save_cookie(cookie)
+    _ok(result)
+
+
+@app.command("save-token")
+def save_token(
+    token: Annotated[str, typer.Argument(help="Raw Clerk JWT token (header.payload.signature)")],
+) -> None:
+    """
+    Save a raw Suno JWT bearer token to the OS keychain (manual auth method).
+
+    How to get your token:
+      1. DevTools > Network > filter studio-api.prod.suno.com
+      2. Click any authenticated request
+      3. Copy the value after 'Authorization: Bearer '
+    """
+    store = get_credential_store()
+    result = store.save_token(token)
+    _ok(result)
+
+
+@app.command("cred-status")
+def cred_status() -> None:
+    """Show what credentials are stored (no secrets revealed)."""
+    store = get_credential_store()
+    result = store.status()
+    console.print(Panel(result, title="[bold cyan]Credential Status[/bold cyan]", expand=False))
+
+
 @app.command("clear-auth")
 def clear_auth() -> None:
     """Delete all stored credentials from the OS keychain."""
     confirm = typer.confirm("This will delete all saved Suno credentials. Continue?")
     if not confirm:
         raise typer.Abort()
-    result = _run(_t().clear_credentials())
+    store = get_credential_store()
+    result = store.clear()
     _ok(result)
 
 
@@ -157,12 +209,16 @@ def generate(
     prompt: Annotated[str, typer.Argument(help="Lyrics or auto-mode description")],
     tags: Annotated[str, typer.Option("--tags", "-t", help="Style tags (<=200 chars)")] = "",
     title: Annotated[str, typer.Option("--title", help="Song title")] = "",
-    model: Annotated[str, typer.Option("--model", "-m", help="Model alias: v5, v4.5x, v4, v3.5")] = "v5",
+    model: Annotated[str, typer.Option("--model", "-m", help="Model: v5, v4.5x, v4.5, v4, v3.5, v3")] = "v5",
     vocal_gender: Annotated[str, typer.Option("--gender", help="Vocal gender: male, female, or empty")] = "",
     weirdness: Annotated[int, typer.Option("--weirdness", "-w", min=0, max=100, help="0=conventional 100=experimental")] = 50,
     style_weight: Annotated[int, typer.Option("--style-weight", min=0, max=100, help="Style tag influence")] = 50,
     negative_tags: Annotated[str, typer.Option("--no", help="Styles to avoid")] = "",
     instrumental: Annotated[bool, typer.Option("--instrumental", help="No vocals")] = False,
+    persona_id: Annotated[str, typer.Option("--persona", help="Persona UUID for consistent vocal style (Pro)")] = "",
+    inspo_clip_id: Annotated[str, typer.Option("--inspo", help="Song ID to use as style inspiration")] = "",
+    inspo_start_s: Annotated[float, typer.Option("--inspo-start", help="Start time (s) within inspo clip")] = 0.0,
+    inspo_end_s: Annotated[float, typer.Option("--inspo-end", help="End time (s) within inspo clip (0=full)")] = 0.0,
     wait: Annotated[bool, typer.Option("--wait", help="Wait for audio URL before returning")] = False,
     download_to: Annotated[Optional[Path], typer.Option("--download", "-d", help="Download MP3 to this directory after generation")] = None,
 ) -> None:
@@ -173,10 +229,12 @@ def generate(
 
         suno generate "rainy nights, neon streets" --tags "synthwave, female vocals" --title "Neon Rain" --wait
 
-        suno generate "[Verse]\\nLine one\\nLine two\\n[Chorus]\\nHook here" --tags "folk pop, acoustic" --gender female --weirdness 20 --download ~/Music
+        suno generate "[Verse]\\nLine one\\nLine two\\n[Chorus]\\nHook" --tags "folk pop, acoustic" --gender female --weirdness 20 --download ~/Music
+
+        suno generate "dark electro ballad" --persona <uuid> --inspo <song-id>
     """
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as p:
-        p.add_task("Submitting generation (browser window will open ~15s)…")
+        p.add_task("Submitting generation (browser window will open ~15s)...")
         result = _run(_t().api_generate_track(
             prompt=prompt,
             tags=tags,
@@ -187,6 +245,10 @@ def generate(
             style_weight=style_weight,
             negative_tags=negative_tags,
             make_instrumental=instrumental,
+            persona_id=persona_id,
+            inspo_clip_id=inspo_clip_id,
+            inspo_start_s=inspo_start_s,
+            inspo_end_s=inspo_end_s,
         ))
 
     console.print(result)
@@ -197,13 +259,14 @@ def generate(
 
     if (wait or download_to) and ids:
         for song_id in ids:
-            with Progress(SpinnerColumn(), TextColumn(f"Waiting for {song_id[:8]}…"), transient=True) as p:
+            with Progress(SpinnerColumn(), TextColumn(f"Waiting for {song_id[:8]}..."), transient=True) as p:
                 p.add_task("")
                 song_result = _run(_t().wait_for_song(song_id=song_id, timeout=180))
             console.print(song_result)
 
             if download_to:
-                with Progress(SpinnerColumn(), TextColumn(f"Downloading {song_id[:8]}…"), transient=True) as p:
+                download_to.mkdir(parents=True, exist_ok=True)
+                with Progress(SpinnerColumn(), TextColumn(f"Downloading {song_id[:8]}..."), transient=True) as p:
                     p.add_task("")
                     dl_result = _run(_t().download_song(song_id=song_id, output_dir=str(download_to)))
                 _ok(dl_result)
@@ -215,7 +278,7 @@ def wait(
     timeout: Annotated[int, typer.Option(help="Seconds to wait")] = 120,
 ) -> None:
     """Poll until a song finishes generating, then show its audio URL."""
-    with Progress(SpinnerColumn(), TextColumn(f"Waiting for [cyan]{song_id[:8]}…[/cyan]"), transient=True) as p:
+    with Progress(SpinnerColumn(), TextColumn(f"Waiting for {song_id[:8]}..."), transient=True) as p:
         p.add_task("")
         result = _run(_t().wait_for_song(song_id=song_id, timeout=timeout))
     console.print(result)
@@ -230,7 +293,7 @@ def extend(
     model: Annotated[str, typer.Option("--model", "-m")] = "v5",
 ) -> None:
     """Continue generating from where an existing song ends."""
-    result = _run(_t().extend_song(
+    result = _run(_t().api_extend_song(
         song_id=song_id,
         prompt=prompt,
         tags=tags,
@@ -249,12 +312,39 @@ def remix(
     model: Annotated[str, typer.Option("--model", "-m")] = "v5",
 ) -> None:
     """Remix an existing song with a new style or direction."""
-    result = _run(_t().remix_song(
+    result = _run(_t().api_remix_song(
         song_id=song_id,
         prompt=prompt,
         tags=tags,
         title=title,
         model=model,
+    ))
+    console.print(result)
+
+
+@app.command()
+def inpaint(
+    song_id: Annotated[str, typer.Argument(help="Song UUID to edit")],
+    start: Annotated[float, typer.Argument(help="Start time of section to replace (seconds)")],
+    end: Annotated[float, typer.Argument(help="End time of section to replace (seconds)")],
+    prompt: Annotated[str, typer.Argument(help="Description or lyrics for the new section")],
+    tags: Annotated[str, typer.Option("--tags", "-t", help="Style tags for the replacement section")] = "",
+) -> None:
+    """
+    Replace a specific time section of a song (inpainting/surgery).
+
+    Re-generates only the section between START and END while keeping the
+    rest of the song intact. Requires Pro plan or higher.
+
+    Example:
+        suno inpaint <song-id> 30 60 "energetic guitar solo" --tags "rock"
+    """
+    result = _run(_t().api_inpaint_song(
+        song_id=song_id,
+        start_seconds=start,
+        end_seconds=end,
+        prompt=prompt,
+        tags=tags,
     ))
     console.print(result)
 
@@ -306,7 +396,7 @@ def search(
     page: Annotated[int, typer.Option("--page", "-p")] = 0,
 ) -> None:
     """Search public Suno songs, playlists, or users."""
-    result = _run(_t().search(query=query, search_type=search_type, page=page))
+    result = _run(_t().search_songs(query=query, search_type=search_type, page=page))
     console.print(result)
 
 
@@ -316,6 +406,51 @@ def liked(
 ) -> None:
     """List songs you have liked."""
     result = _run(_t().get_liked_songs(page=page))
+    console.print(result)
+
+
+@app.command()
+def alignment(
+    song_id: Annotated[str, typer.Argument(help="Song UUID")],
+    json_out: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Get word-level lyric timestamps (karaoke alignment) for a song."""
+    result = _run(_t().api_get_lyric_alignment(song_id=song_id))
+    if json_out:
+        console.print_json(result if result.startswith("{") or result.startswith("[") else json.dumps({"result": result}))
+    else:
+        console.print(result)
+
+
+# ─────────────────────────────────────────────
+# PERSONA commands
+# ─────────────────────────────────────────────
+
+@app.command()
+def persona(
+    persona_id: Annotated[str, typer.Argument(help="Persona UUID")],
+    page: Annotated[int, typer.Option("--page", "-p", help="Page of persona's clip list")] = 1,
+) -> None:
+    """Fetch details and clips for a Persona by its UUID."""
+    result = _run(_t().api_get_persona(persona_id=persona_id, page=page))
+    console.print(result)
+
+
+@app.command("my-personas")
+def my_personas(
+    page: Annotated[int, typer.Option("--page", "-p")] = 0,
+) -> None:
+    """List Personas you have created (Pro feature)."""
+    result = _run(_t().api_get_my_personas(page=page))
+    console.print(result)
+
+
+@app.command("featured-personas")
+def featured_personas(
+    page: Annotated[int, typer.Option("--page", "-p")] = 0,
+) -> None:
+    """List Suno's curated featured Personas available to all Pro users."""
+    result = _run(_t().api_get_featured_personas(page=page))
     console.print(result)
 
 
@@ -346,7 +481,24 @@ def playlist_create(
     description: Annotated[str, typer.Option("--desc", help="Playlist description")] = "",
 ) -> None:
     """Create a new playlist."""
-    result = _run(_t().create_playlist(name=name, description=description))
+    result = _run(_t().api_create_playlist(name=name, description=description))
+    _ok(result)
+
+
+@app.command("playlist-update")
+def playlist_update(
+    playlist_id: Annotated[str, typer.Argument(help="Playlist UUID")],
+    name: Annotated[str, typer.Option("--name", help="New name")] = "",
+    description: Annotated[str, typer.Option("--desc", help="New description")] = "",
+    public: Annotated[Optional[bool], typer.Option("--public/--private", help="Set visibility")] = None,
+) -> None:
+    """Rename a playlist or change its description / visibility."""
+    result = _run(_t().api_update_playlist(
+        playlist_id=playlist_id,
+        name=name,
+        description=description,
+        is_public=public,
+    ))
     _ok(result)
 
 
@@ -356,7 +508,7 @@ def playlist_add(
     song_id: Annotated[str, typer.Argument(help="Song UUID to add")],
 ) -> None:
     """Add a song to a playlist."""
-    result = _run(_t().add_to_playlist(playlist_id=playlist_id, song_id=song_id))
+    result = _run(_t().api_add_to_playlist(playlist_id=playlist_id, song_id=song_id))
     _ok(result)
 
 
@@ -366,7 +518,7 @@ def playlist_remove(
     song_id: Annotated[str, typer.Argument(help="Song UUID to remove")],
 ) -> None:
     """Remove a song from a playlist."""
-    result = _run(_t().remove_from_playlist(playlist_id=playlist_id, song_id=song_id))
+    result = _run(_t().api_remove_from_playlist(playlist_id=playlist_id, song_id=song_id))
     _ok(result)
 
 
@@ -382,7 +534,7 @@ def download(
 ) -> None:
     """Download a song's MP3 (and optional cover art) to a local directory."""
     output.mkdir(parents=True, exist_ok=True)
-    with Progress(SpinnerColumn(), TextColumn(f"Downloading [cyan]{song_id[:8]}…[/cyan]"), transient=True) as p:
+    with Progress(SpinnerColumn(), TextColumn(f"Downloading {song_id[:8]}..."), transient=True) as p:
         p.add_task("")
         result = _run(_t().download_song(
             song_id=song_id,
@@ -400,7 +552,7 @@ def download_playlist(
 ) -> None:
     """Download all songs in a playlist."""
     output.mkdir(parents=True, exist_ok=True)
-    with Progress(SpinnerColumn(), TextColumn("Downloading playlist…"), transient=True) as p:
+    with Progress(SpinnerColumn(), TextColumn("Downloading playlist..."), transient=True) as p:
         p.add_task("")
         result = _run(_t().download_playlist(
             playlist_id=playlist_id,
@@ -418,7 +570,7 @@ def download_library(
 ) -> None:
     """Download a page of songs from your personal library."""
     output.mkdir(parents=True, exist_ok=True)
-    with Progress(SpinnerColumn(), TextColumn("Downloading library…"), transient=True) as p:
+    with Progress(SpinnerColumn(), TextColumn("Downloading library..."), transient=True) as p:
         p.add_task("")
         result = _run(_t().download_my_songs(
             output_dir=str(output),
@@ -437,7 +589,7 @@ def like(
     song_id: Annotated[str, typer.Argument(help="Song UUID")],
 ) -> None:
     """Like / upvote a song."""
-    result = _run(_t().like_song(song_id=song_id))
+    result = _run(_t().api_like_song(song_id=song_id))
     _ok(result)
 
 
@@ -446,7 +598,7 @@ def publish(
     song_id: Annotated[str, typer.Argument(help="Song UUID")],
 ) -> None:
     """Make one of your songs publicly visible."""
-    result = _run(_t().make_public(song_id=song_id))
+    result = _run(_t().api_make_public(song_id=song_id))
     _ok(result)
 
 
@@ -455,10 +607,10 @@ def delete(
     song_id: Annotated[str, typer.Argument(help="Song UUID")],
 ) -> None:
     """Move a song to trash (soft delete)."""
-    confirm = typer.confirm(f"Move song {song_id[:8]}… to trash?")
+    confirm = typer.confirm(f"Move song {song_id[:8]}... to trash?")
     if not confirm:
         raise typer.Abort()
-    result = _run(_t().delete_song(song_id=song_id))
+    result = _run(_t().api_delete_song(song_id=song_id))
     _ok(result)
 
 
@@ -471,6 +623,13 @@ def credits() -> None:
     """Show remaining credits and subscription plan."""
     result = _run(_t().get_credits())
     console.print(Panel(result, title="[bold cyan]Suno Credits[/bold cyan]", expand=False))
+
+
+@app.command()
+def billing() -> None:
+    """Show billing and subscription details."""
+    result = _run(_t().get_billing_info())
+    console.print(result)
 
 
 @app.command()
@@ -495,10 +654,10 @@ def plans() -> None:
 def lyrics(
     prompt: Annotated[str, typer.Argument(help="Topic or mood for lyric generation")],
 ) -> None:
-    """Generate AI-written lyrics from a topic (no audio — text only)."""
-    with Progress(SpinnerColumn(), TextColumn("Generating lyrics…"), transient=True) as p:
+    """Generate AI-written lyrics from a topic (no audio -- text only)."""
+    with Progress(SpinnerColumn(), TextColumn("Generating lyrics..."), transient=True) as p:
         p.add_task("")
-        result = _run(_t().generate_lyrics(prompt=prompt))
+        result = _run(_t().api_generate_lyrics(prompt=prompt))
     console.print(Panel(result, title="[bold cyan]Generated Lyrics[/bold cyan]"))
 
 
@@ -507,7 +666,7 @@ def stems(
     song_id: Annotated[str, typer.Argument(help="Song UUID to separate")],
 ) -> None:
     """Split a completed song into individual stem tracks (requires Premier)."""
-    result = _run(_t().generate_stems(song_id=song_id))
+    result = _run(_t().api_generate_stems(song_id=song_id))
     console.print(result)
 
 
@@ -516,7 +675,7 @@ def concat(
     clip_id: Annotated[str, typer.Argument(help="Extension clip ID to merge with its parent")],
 ) -> None:
     """Merge an extension clip with its parent into a full-length song."""
-    result = _run(_t().concat_song(clip_id=clip_id))
+    result = _run(_t().api_concat_song(clip_id=clip_id))
     console.print(result)
 
 
@@ -538,62 +697,74 @@ def info() -> None:
     table.add_column("Key options")
 
     rows = [
-        # Auth
-        ("login",             "Browser login — saves session to keychain",       "--headless"),
-        ("status",            "Session + credit balance",                         "--json"),
-        ("refresh",           "Force-refresh the JWT token",                      "--force"),
-        ("clear-auth",        "Delete all stored credentials",                    ""),
-        # Generate
-        ("generate <prompt>", "Generate a song (2 variations)",                   "--tags --title --model --wait --download"),
-        ("wait <id>",         "Poll until song audio is ready",                   "--timeout"),
-        ("extend <id>",       "Continue generating from where a song ends",       "--prompt --at"),
-        ("remix <id> <desc>", "Remix a song with a new style",                    "--tags --title"),
-        ("lyrics <topic>",    "Generate lyrics text (no audio)",                  ""),
-        # Library
-        ("songs",             "List your song library",                           "--page"),
-        ("song <id>",         "Details for a single song",                        "--json"),
-        ("trending",          "Trending songs feed",                              "--period day|week"),
-        ("search <query>",    "Search public songs/playlists/users",              "--type"),
-        ("liked",             "Songs you have liked",                             "--page"),
-        # Playlists
-        ("playlists",         "List your playlists",                              ""),
-        ("playlist <id>",     "Songs inside a playlist",                          "--page"),
-        ("playlist-create",   "Create a new playlist",                            "--desc"),
-        ("playlist-add",      "Add a song to a playlist",                         ""),
-        ("playlist-remove",   "Remove a song from a playlist",                    ""),
-        # Download
-        ("download <id>",     "Download MP3 + cover art",                         "--output --no-cover"),
-        ("download-playlist", "Download all songs in a playlist",                 "--output --max"),
-        ("download-library",  "Bulk download personal library",                   "--output --page --max"),
-        # Actions
-        ("like <id>",         "Like a song",                                      ""),
-        ("publish <id>",      "Make a song public",                               ""),
-        ("delete <id>",       "Move song to trash",                               ""),
-        # Account
-        ("credits",           "Remaining credits + subscription plan",            ""),
-        ("contests",          "Active song contests",                             ""),
-        ("plans",             "Available subscription plans",                     ""),
-        # Advanced
-        ("stems <id>",        "Split song into stem tracks (Premier)",            ""),
-        ("concat <clip-id>",  "Merge extension clip with parent",                 ""),
+        # AUTH
+        ("login",                   "Browser login -- saves session to keychain",   "--headless"),
+        ("check-auth",              "Verify session token is valid",                ""),
+        ("status",                  "Session + credit balance",                     "--json"),
+        ("refresh",                 "Force-refresh the JWT token",                  "--force"),
+        ("save-cookie",             "Save __session cookie to keychain",            ""),
+        ("save-token",              "Save raw JWT bearer token to keychain",        ""),
+        ("cred-status",             "Show stored credential fingerprints",          ""),
+        ("clear-auth",              "Delete all stored credentials",                ""),
+        # GENERATE
+        ("generate <prompt>",       "Generate a song (2 variations)",               "--tags --title --model --wait --download"),
+        ("wait <id>",               "Poll until song audio is ready",               "--timeout"),
+        ("extend <id>",             "Continue generating from end of song",         "--prompt --at --model"),
+        ("remix <id> <desc>",       "Remix a song with a new style",                "--tags --title --model"),
+        ("inpaint <id> <s> <e> <p>","Replace a time section of a song (Pro)",       "--tags"),
+        ("lyrics <topic>",          "Generate lyrics text (no audio)",              ""),
+        # LIBRARY
+        ("songs",                   "List your song library",                       "--page --json"),
+        ("song <id>",               "Details for a single song",                    "--json"),
+        ("trending",                "Trending songs feed",                          "--period day|week"),
+        ("search <query>",          "Search songs/playlists/users",                 "--type --page"),
+        ("liked",                   "Songs you have liked",                         "--page"),
+        ("alignment <id>",          "Word-level lyric timestamps (karaoke)",        "--json"),
+        # PERSONAS
+        ("persona <id>",            "Fetch a Persona's details and clips",          "--page"),
+        ("my-personas",             "Your created Personas (Pro)",                  "--page"),
+        ("featured-personas",       "Suno's curated featured Personas",             "--page"),
+        # PLAYLISTS
+        ("playlists",               "List your playlists",                          ""),
+        ("playlist <id>",           "Songs inside a playlist",                      "--page"),
+        ("playlist-create",         "Create a new playlist",                        "--desc"),
+        ("playlist-update <id>",    "Rename / change visibility",                   "--name --desc --public"),
+        ("playlist-add",            "Add a song to a playlist",                     ""),
+        ("playlist-remove",         "Remove a song from a playlist",                ""),
+        # DOWNLOAD
+        ("download <id>",           "Download MP3 + cover art",                     "--output --no-cover"),
+        ("download-playlist <id>",  "Download all songs in a playlist",             "--output --max"),
+        ("download-library",        "Bulk download personal library",               "--output --page --max"),
+        # SONG ACTIONS
+        ("like <id>",               "Like a song",                                  ""),
+        ("publish <id>",            "Make a song public",                           ""),
+        ("delete <id>",             "Move song to trash",                           ""),
+        # ACCOUNT
+        ("credits",                 "Remaining credits + subscription plan",        ""),
+        ("billing",                 "Billing and subscription details",             ""),
+        ("contests",                "Active song contests",                         ""),
+        ("plans",                   "Available subscription plans",                 ""),
+        # ADVANCED
+        ("stems <id>",              "Split into stem tracks (Premier)",             ""),
+        ("concat <clip-id>",        "Merge extension clip with parent",             ""),
     ]
 
-    section_headers = {"login", "generate <prompt>", "songs", "playlists", "download <id>", "like <id>", "credits", "stems <id>"}
-    section_labels = {
-        "login":             "AUTH",
+    section_headers = {
+        "login":            "AUTH",
         "generate <prompt>": "GENERATE",
-        "songs":             "LIBRARY",
-        "playlists":         "PLAYLISTS",
-        "download <id>":     "DOWNLOAD",
-        "like <id>":         "SONG ACTIONS",
-        "credits":           "ACCOUNT",
-        "stems <id>":        "ADVANCED",
+        "songs":            "LIBRARY",
+        "persona <id>":     "PERSONAS",
+        "playlists":        "PLAYLISTS",
+        "download <id>":    "DOWNLOAD",
+        "like <id>":        "SONG ACTIONS",
+        "credits":          "ACCOUNT",
+        "stems <id>":       "ADVANCED",
     }
 
     for cmd, desc, opts in rows:
         if cmd in section_headers:
             table.add_section()
-            label = section_labels[cmd]
+            label = section_headers[cmd]
             table.add_row(f"[dim]-- {label} --[/dim]", "", "", style="dim")
         table.add_row(cmd, desc, f"[dim]{opts}[/dim]")
 

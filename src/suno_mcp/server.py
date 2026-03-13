@@ -170,6 +170,15 @@ async def list_tools():
         {"name": "suno_api_download_song", "category": "api", "auth": "none"},
         {"name": "suno_api_download_playlist", "category": "api", "auth": "none"},
         {"name": "suno_api_download_my_songs", "category": "api", "auth": "required"},
+        # Persona
+        {"name": "suno_api_get_persona", "category": "persona", "auth": "required"},
+        {"name": "suno_api_get_my_personas", "category": "persona", "auth": "required"},
+        {"name": "suno_api_get_featured_personas", "category": "persona", "auth": "required"},
+        # Lyrics / Stems / Concat / Alignment
+        {"name": "suno_api_generate_lyrics", "category": "api", "auth": "required"},
+        {"name": "suno_api_generate_stems", "category": "api", "auth": "required"},
+        {"name": "suno_api_concat_song", "category": "api", "auth": "required"},
+        {"name": "suno_api_get_lyric_alignment", "category": "api", "auth": "required"},
     ]
     all_tools = session_tools + credential_tools + browser_tools + api_tool_names
     return {
@@ -467,6 +476,10 @@ async def suno_api_generate(
     vocal_gender: str = "",
     weirdness: int = 50,
     style_weight: int = 50,
+    persona_id: str = "",
+    inspo_clip_id: str = "",
+    inspo_start_s: float = 0.0,
+    inspo_end_s: float = 0.0,
 ) -> str:
     """
     Generate a new song — full v5 support with all advanced options.
@@ -499,6 +512,12 @@ async def suno_api_generate(
         vocal_gender: "male", "female", or "" (Suno decides)
         weirdness: 0–100 — creativity/unexpectedness (default: 50)
         style_weight: 0–100 — how strictly style tags are applied (default: 50)
+        persona_id: Persona UUID for a consistent vocal character (Pro feature).
+                    Get IDs via suno_api_get_persona or suno_api_get_my_personas.
+        inspo_clip_id: Song ID to use as Inspo (style reference for generation).
+                       The model draws musical inspiration from this track.
+        inspo_start_s: Start time (seconds) within the inspo clip (0 = beginning).
+        inspo_end_s: End time (seconds) within the inspo clip (0 = full song).
 
     Cost: 10 credits × 2 variations = 20 credits
 
@@ -514,6 +533,10 @@ async def suno_api_generate(
         vocal_gender=vocal_gender,
         weirdness=weirdness,
         style_weight=style_weight,
+        persona_id=persona_id,
+        inspo_clip_id=inspo_clip_id,
+        inspo_start_s=inspo_start_s,
+        inspo_end_s=inspo_end_s,
     )
 
 
@@ -907,6 +930,150 @@ async def suno_api_get_my_playlists() -> str:
         List of your playlists with names, song counts, and IDs
     """
     return await api_tools.get_my_playlists()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PERSONA — Vocal character management (Pro feature)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@mcp_app.tool()
+async def suno_api_get_persona(persona_id: str, page: int = 1) -> str:
+    """
+    Fetch a Suno Persona by its UUID.
+
+    A Persona is a consistent vocal character built from an existing song.
+    Apply it to any generation via suno_api_generate(persona_id=...) to get
+    a reproducible vocal style across multiple songs.
+
+    Args:
+        persona_id: The UUID of the persona to look up
+        page: Page number for the persona's clip list (default: 1)
+
+    Returns:
+        Persona details: name, description, owner, clips, and usage hint.
+
+    Requires: Authentication (Pro subscription for using personas in generation)
+    """
+    return await api_tools.api_get_persona(persona_id, page)
+
+
+@mcp_app.tool()
+async def suno_api_get_my_personas(page: int = 0) -> str:
+    """
+    List Personas you have created (Pro feature).
+
+    Returns:
+        Your personas with IDs, names, and clip counts.
+
+    Requires: Authentication + Pro or Premier subscription
+    """
+    return await api_tools.api_get_my_personas(page)
+
+
+@mcp_app.tool()
+async def suno_api_get_featured_personas(page: int = 0) -> str:
+    """
+    List Suno's curated/featured Personas available to all Pro users.
+
+    Returns:
+        Featured personas with IDs, names, and descriptions.
+
+    Requires: Authentication
+    """
+    return await api_tools.api_get_featured_personas(page)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LYRICS GENERATION — AI lyric writing
+# ─────────────────────────────────────────────────────────────────────────────
+
+@mcp_app.tool()
+async def suno_api_generate_lyrics(prompt: str) -> str:
+    """
+    Generate AI-written lyrics from a topic or theme.
+
+    This produces only text — no audio. Use the output as the 'prompt'
+    parameter in suno_api_generate() to turn the lyrics into a song.
+
+    Args:
+        prompt: Topic, mood, or short description
+                e.g. "a melancholy song about a lighthouse keeper in winter"
+
+    Returns:
+        Suggested title + full generated lyrics.
+
+    Requires: Authentication
+    """
+    return await api_tools.api_generate_lyrics(prompt)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEMS — Audio stem separation (Premier feature)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@mcp_app.tool()
+async def suno_api_generate_stems(song_id: str) -> str:
+    """
+    Split a completed song into individual stem tracks.
+
+    Produces separate audio files for vocals, drums, bass, melody, etc.
+    Each stem is returned as a new clip that can be downloaded individually.
+
+    Args:
+        song_id: ID of a completed song to separate
+
+    Returns:
+        Stem clip IDs and statuses — use suno_api_wait_for_song() per stem.
+
+    Requires: Authentication + Premier subscription
+    """
+    return await api_tools.api_generate_stems(song_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONCAT — Merge extended clips into one track
+# ─────────────────────────────────────────────────────────────────────────────
+
+@mcp_app.tool()
+async def suno_api_concat_song(clip_id: str) -> str:
+    """
+    Merge an extension clip with its parent into a single full-length song.
+
+    After using suno_api_extend() to lengthen a song, call this to combine
+    all the pieces into one continuous track.
+
+    Args:
+        clip_id: ID of the extension clip to concatenate
+
+    Returns:
+        New clip ID of the merged song.
+
+    Requires: Authentication
+    """
+    return await api_tools.api_concat_song(clip_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LYRIC ALIGNMENT — Word-level timestamps
+# ─────────────────────────────────────────────────────────────────────────────
+
+@mcp_app.tool()
+async def suno_api_get_lyric_alignment(song_id: str) -> str:
+    """
+    Get word-level lyric timestamps for karaoke-style synchronization.
+
+    Returns each word with its precise start and end time in seconds,
+    suitable for building lyric displays or timed captions.
+
+    Args:
+        song_id: ID of a completed song
+
+    Returns:
+        Table of words with start_s and end_s timestamps.
+
+    Requires: Authentication
+    """
+    return await api_tools.api_get_lyric_alignment(song_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

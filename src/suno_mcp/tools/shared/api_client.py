@@ -516,6 +516,92 @@ class SunoApiClient:
                             progress_callback(downloaded, total)
         return downloaded
 
+    # ─── Persona ──────────────────────────────────────────────────────────────
+
+    async def get_persona(self, persona_id: str, page: int = 1) -> Dict:
+        """
+        Fetch a Persona and its clips (paginated).
+
+        Endpoint: GET /api/persona/get-persona-paginated/{persona_id}/?page={page}
+
+        Returns:
+            {persona: {id, name, description, root_clip_id, clip, ...},
+             total_results, current_page, is_following}
+        """
+        return await self._get(
+            f"/persona/get-persona-paginated/{persona_id}/",
+            params={"page": page},
+        )
+
+    async def get_my_personas(self, page: int = 0) -> Dict:
+        """Fetch personas owned by the current user."""
+        return await self._get("/persona/", params={"page": page, "filter": "owned"})
+
+    async def get_featured_personas(self, page: int = 0) -> Dict:
+        """Fetch Suno's curated/featured personas."""
+        return await self._get("/persona/", params={"page": page, "filter": "featured"})
+
+    # ─── Lyrics generation ────────────────────────────────────────────────────
+
+    async def generate_lyrics(self, prompt: str, poll_timeout: float = 30.0) -> Dict:
+        """
+        Generate AI lyrics from a topic/theme, with blocking poll until complete.
+
+        Endpoint: POST /api/generate/lyrics/
+        Poll:     GET  /api/generate/lyrics/{id}  until status == 'complete'
+
+        Returns:
+            {id, status, title, text}
+        """
+        import asyncio as _asyncio
+
+        resp = await self._post("/generate/lyrics/", {"prompt": prompt})
+        gen_id = resp.get("id")
+        if not gen_id:
+            return resp
+
+        deadline = _asyncio.get_event_loop().time() + poll_timeout
+        while _asyncio.get_event_loop().time() < deadline:
+            poll = await self._get(f"/generate/lyrics/{gen_id}")
+            if poll.get("status") == "complete":
+                return poll
+            await _asyncio.sleep(2)
+
+        return {"id": gen_id, "status": "timeout", "text": ""}
+
+    # ─── Stems ────────────────────────────────────────────────────────────────
+
+    async def generate_stems(self, song_id: str) -> Dict:
+        """
+        Separate a song into its individual stems (vocals, drums, bass, etc.).
+
+        Endpoint: POST /api/edit/stems/{song_id}
+        Premier plan required.
+        """
+        return await self._post(f"/edit/stems/{song_id}", {})
+
+    # ─── Concat ───────────────────────────────────────────────────────────────
+
+    async def concat_song(self, clip_id: str) -> Dict:
+        """
+        Concatenate extended clips back into a single full-length song.
+
+        Endpoint: POST /api/generate/concat/v2/
+        """
+        return await self._post("/generate/concat/v2/", {"clip_id": clip_id})
+
+    # ─── Lyric alignment ──────────────────────────────────────────────────────
+
+    async def get_lyric_alignment(self, song_id: str) -> Dict:
+        """
+        Get word-level lyric timestamps (karaoke-style alignment).
+
+        Endpoint: GET /api/gen/{song_id}/aligned_lyrics/v2/
+
+        Returns list of {word, start_s, end_s, success, p_align}
+        """
+        return await self._get(f"/gen/{song_id}/aligned_lyrics/v2/")
+
     async def close(self) -> None:
         """Close the HTTP client."""
         if self._client and not self._client.is_closed:

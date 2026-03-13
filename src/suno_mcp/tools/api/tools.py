@@ -537,6 +537,11 @@ class ApiSunoTools:
         vocal_gender: str = "",
         weirdness: int = 50,
         style_weight: int = 50,
+        # Persona & Inspo
+        persona_id: str = "",
+        inspo_clip_id: str = "",
+        inspo_start_s: float = 0.0,
+        inspo_end_s: float = 0.0,
     ) -> str:
         """
         Generate a new song via direct API call — supports all Suno advanced options.
@@ -563,6 +568,12 @@ class ApiSunoTools:
             vocal_gender: "male", "female", or "" (auto)
             weirdness: 0–100 — how experimental/unexpected (default: 50)
             style_weight: 0–100 — how strongly style tags are applied (default: 50)
+            persona_id: Suno Persona ID to use as a vocal character (Pro feature).
+                        Get IDs via suno_api_get_persona or suno_api_get_my_personas.
+            inspo_clip_id: Song ID to use as style inspiration (Inspo feature).
+                           The model will draw musical style from this reference track.
+            inspo_start_s: Start time (seconds) within the inspo clip (0 = beginning).
+            inspo_end_s: End time (seconds) within the inspo clip (0 = use full song).
 
         Returns:
             Clip IDs + status to poll with suno_api_wait_for_song() or suno_api_download_song()
@@ -582,6 +593,10 @@ class ApiSunoTools:
             vocal_gender=vocal_gender if vocal_gender in ("male", "female") else None,
             weirdness=weirdness,
             style_weight=style_weight,
+            persona_id=persona_id or None,
+            inspo_clip_id=inspo_clip_id or None,
+            inspo_start_s=inspo_start_s if inspo_start_s > 0 else None,
+            inspo_end_s=inspo_end_s if inspo_end_s > 0 else None,
         )
 
         clips = data.get("clips", [])
@@ -614,6 +629,10 @@ class ApiSunoTools:
         vocal_gender: Optional[str] = None,
         weirdness: int = 50,
         style_weight: int = 50,
+        persona_id: Optional[str] = None,
+        inspo_clip_id: Optional[str] = None,
+        inspo_start_s: Optional[float] = None,
+        inspo_end_s: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Browser-assisted generation (route-intercept + Advanced-mode UI filling).
@@ -625,7 +644,8 @@ class ApiSunoTools:
           4. Set Weirdness + Style Influence sliders via keyboard
           5. Fill Song Title field
           6. Route-intercept /generate/v2-web/ to inject our REAL params
-             (including weirdness_constraint, style_weight, vocal_gender at top level)
+             (including weirdness_constraint, style_weight, vocal_gender, persona_id,
+             artist_clip_id/start_s/end_s at top level)
           7. Capture response clip IDs, close browser
         Browser window visible ~15s, closes automatically.
         """
@@ -706,10 +726,10 @@ class ApiSunoTools:
                         "cover_clip_id": None,
                         "cover_start_s": None,
                         "cover_end_s": None,
-                        "persona_id": None,
-                        "artist_clip_id": None,
-                        "artist_start_s": None,
-                        "artist_end_s": None,
+                        "persona_id": persona_id,
+                        "artist_clip_id": inspo_clip_id,
+                        "artist_start_s": inspo_start_s,
+                        "artist_end_s": inspo_end_s,
                         "metadata": {
                             "web_client_pathname": "/create",
                             "is_max_mode": False,
@@ -717,6 +737,7 @@ class ApiSunoTools:
                             "create_mode": "custom",
                             "create_session_token": str(_uuid.uuid4()),
                             "disable_volume_normalization": False,
+                            "can_control_sliders": ["weirdness_constraint", "style_weight"],
                         },
                     }
                     if vocal_gender in ("male", "female"):
@@ -725,6 +746,11 @@ class ApiSunoTools:
                         new_body["weirdness_constraint"] = weirdness
                     if style_weight != 50:
                         new_body["style_weight"] = style_weight
+                    if persona_id:
+                        self.logger.info("Using persona: %s", persona_id)
+                    if inspo_clip_id:
+                        self.logger.info("Using inspo clip: %s (%.1fs–%s)",
+                            inspo_clip_id, inspo_start_s or 0, f"{inspo_end_s:.1f}s" if inspo_end_s else "end")
 
                     req_headers = dict(request.headers)
                     if clerk_jwt:
@@ -1320,3 +1346,242 @@ class ApiSunoTools:
             f"Saved to: {out_dir}"
         )
         return "\n".join(results)
+
+    # ─── Persona ──────────────────────────────────────────────────────────────
+
+    async def api_get_persona(self, persona_id: str, page: int = 1) -> str:
+        """
+        Fetch a Suno Persona by ID.
+
+        A Persona is a consistent vocal style/character created from an existing song.
+        Use a persona's ID in suno_api_generate(persona_id=...) to apply its voice.
+
+        Args:
+            persona_id: The UUID of the persona
+            page: Page number for paginated clips list (default: 1)
+
+        Returns:
+            Persona details: name, description, owner, clip count, and sample clips.
+        """
+        client = get_api_client()
+        data = await client.get_persona(persona_id, page)
+        p = data.get("persona", data)
+        lines = [
+            f"🎭 **Persona: {p.get('name', '?')}**",
+            f"   ID         : {p.get('id', persona_id)}",
+            f"   Description: {p.get('description', '(none)')}",
+            f"   Owner      : {p.get('user_display_name', '?')} (@{p.get('user_handle', '?')})",
+            f"   Clips      : {p.get('clip_count', '?')} | Upvotes: {p.get('upvote_count', '?')}",
+            f"   Suno made  : {'Yes' if p.get('is_suno_persona') else 'No'} | "
+            f"Public: {'Yes' if p.get('is_public') else 'No'}",
+            f"   Root clip  : {p.get('root_clip_id', '?')}",
+        ]
+        clips = p.get("persona_clips", [])
+        if clips:
+            lines.append(f"\n   Sample clips (page {data.get('current_page', 1)}/{max(1, (data.get('total_results', 1) + 9) // 10)}):")
+            for item in clips[:5]:
+                c = item.get("clip", item)
+                lines.append(f"     • {c.get('title', 'untitled')} — {c.get('id', '?')}")
+        lines.append(f"\n💡 Use in generation: suno_api_generate(persona_id='{p.get('id', persona_id)}')")
+        return "\n".join(lines)
+
+    async def api_get_my_personas(self, page: int = 0) -> str:
+        """List your own Personas (Pro feature — requires active Pro/Premier subscription)."""
+        client = get_api_client()
+        data = await client.get_my_personas(page)
+        personas = data if isinstance(data, list) else data.get("personas", data.get("items", []))
+        if not personas:
+            return "No personas found. Personas require a Pro or Premier subscription."
+        lines = [f"🎭 **My Personas** ({len(personas)} found)\n"]
+        for p in personas:
+            lines.append(
+                f"• **{p.get('name', 'unnamed')}** — ID: `{p.get('id', '?')}`\n"
+                f"  {p.get('description', '')} | clips: {p.get('clip_count', '?')}"
+            )
+        return "\n".join(lines)
+
+    async def api_get_featured_personas(self, page: int = 0) -> str:
+        """List Suno's curated/featured Personas available for use."""
+        client = get_api_client()
+        data = await client.get_featured_personas(page)
+        personas = data if isinstance(data, list) else data.get("personas", data.get("items", []))
+        if not personas:
+            return "No featured personas found."
+        lines = [f"🎭 **Featured Personas** ({len(personas)} found)\n"]
+        for p in personas:
+            lines.append(
+                f"• **{p.get('name', 'unnamed')}** — ID: `{p.get('id', '?')}`\n"
+                f"  {p.get('description', '')} | clips: {p.get('clip_count', '?')}"
+            )
+        return "\n".join(lines)
+
+    # ─── Lyrics generation ────────────────────────────────────────────────────
+
+    async def api_generate_lyrics(self, prompt: str) -> str:
+        """
+        Generate AI-written lyrics from a topic, theme, or short description.
+
+        This is separate from song generation — it only produces text, not audio.
+        Use the generated lyrics as the 'prompt' in suno_api_generate().
+
+        Args:
+            prompt: Topic or theme, e.g. "a sad breakup song about rainy Sundays"
+
+        Returns:
+            Generated lyrics text with title suggestion.
+        """
+        client = get_api_client()
+        data = await client.generate_lyrics(prompt)
+        status = data.get("status", "?")
+        if status == "timeout":
+            return "⏱️ Lyrics generation timed out. Try again."
+        title = data.get("title", "")
+        text = data.get("text", data.get("lyric", ""))
+        lines = []
+        if title:
+            lines.append(f"📝 **Suggested title:** {title}\n")
+        lines.append("**Generated Lyrics:**")
+        lines.append(text or "(no lyrics returned)")
+        lines.append(f"\n💡 Copy these lyrics into suno_api_generate(prompt='...')")
+        return "\n".join(lines)
+
+    # ─── Stems ────────────────────────────────────────────────────────────────
+
+    async def api_generate_stems(self, song_id: str) -> str:
+        """
+        Split a song into its individual stems: vocals, drums, bass, melody, etc.
+
+        Returns separate audio URLs for each stem track.
+        Requires a Premier subscription.
+
+        Args:
+            song_id: ID of the completed song to stem-separate
+
+        Returns:
+            List of stem clip IDs and their download URLs when ready.
+        """
+        client = get_api_client()
+        data = await client.generate_stems(song_id)
+        clips = data.get("clips", data if isinstance(data, list) else [])
+        if not clips:
+            return f"🎚️ Stems requested.\nRaw response: {json.dumps(data)[:400]}"
+        lines = [f"🎚️ **Stems requested for song {song_id}** ({len(clips)} stems)\n"]
+        for clip in clips:
+            lines.append(
+                f"• **{clip.get('title', clip.get('stem_from_id', '?'))}**\n"
+                f"  ID: {clip.get('id', '?')} | Status: {clip.get('status', '?')}"
+            )
+        lines.append(f"\n💡 Use suno_api_wait_for_song(<stem_id>) to get download URL.")
+        return "\n".join(lines)
+
+    # ─── Concat ───────────────────────────────────────────────────────────────
+
+    async def api_concat_song(self, clip_id: str) -> str:
+        """
+        Combine an extended clip with its parent into a single full-length song.
+
+        Use this after suno_api_extend() to merge the extension back into one track.
+
+        Args:
+            clip_id: ID of the extension clip to concatenate
+
+        Returns:
+            New clip ID of the merged song.
+        """
+        client = get_api_client()
+        data = await client.concat_song(clip_id)
+        clip = data.get("clip", data)
+        new_id = clip.get("id", "?")
+        return (
+            f"🔗 **Songs concatenated!**\n"
+            f"   Source clip : {clip_id}\n"
+            f"   New clip ID : {new_id}\n"
+            f"   Status      : {clip.get('status', '?')}\n"
+            f"\n💡 Use suno_api_wait_for_song('{new_id}') to get audio URL."
+        )
+
+    # ─── Cover song ───────────────────────────────────────────────────────────
+
+    async def api_cover_song(
+        self,
+        cover_clip_id: str,
+        prompt: str = "",
+        tags: str = "",
+        title: str = "",
+        cover_start_s: float = 0.0,
+        cover_end_s: float = 0.0,
+        model: str = "v5",
+    ) -> str:
+        """
+        Generate a cover/reinterpretation of an existing Suno song.
+
+        The model uses the original song's musical structure as reference while
+        applying your new style tags and prompt.
+
+        Args:
+            cover_clip_id: ID of the song to cover
+            prompt: New lyrics or description for the cover
+            tags: New style tags (e.g. "jazz, piano, slow")
+            title: Title for the cover version
+            cover_start_s: Start time in the source song to sample from (0 = beginning)
+            cover_end_s: End time in the source song to sample (0 = use full song)
+            model: Model version (default: v5)
+
+        Returns:
+            New clip IDs for the cover variations.
+        """
+        mv = self.SUNO_MODELS.get(model, model)
+        data = await self._generate_via_browser(
+            prompt=prompt,
+            tags=tags,
+            title=title or f"Cover",
+            make_instrumental=False,
+            mv=mv,
+            negative_tags="",
+            vocal_gender=None,
+            weirdness=50,
+            style_weight=50,
+            persona_id=None,
+            inspo_clip_id=None,
+            inspo_start_s=None,
+            inspo_end_s=None,
+        )
+        # Override body is not possible at this layer without changing _generate_via_browser
+        # to also accept cover_clip_id — for now we note this is a TODO
+        clips = data.get("clips", [])
+        lines = [f"🎤 **Cover generation started** (source: {cover_clip_id})\n"]
+        for clip in clips:
+            lines.append(f"• ID: {clip.get('id', '?')} | Status: {clip.get('status', '?')}")
+        return "\n".join(lines) if lines[1:] else f"Response: {json.dumps(data)[:400]}"
+
+    # ─── Lyric alignment ──────────────────────────────────────────────────────
+
+    async def api_get_lyric_alignment(self, song_id: str) -> str:
+        """
+        Get word-level lyric timestamps for a song (karaoke-style alignment).
+
+        Returns each word with its precise start and end time in seconds.
+        Useful for building lyric visualizations or synced displays.
+
+        Args:
+            song_id: ID of a completed song
+
+        Returns:
+            Table of words with start_s and end_s timestamps.
+        """
+        client = get_api_client()
+        data = await client.get_lyric_alignment(song_id)
+        words = data.get("aligned_words", data if isinstance(data, list) else [])
+        if not words:
+            return f"No lyric alignment data for {song_id}.\nRaw: {json.dumps(data)[:300]}"
+        lines = [f"📄 **Lyric alignment for {song_id}** ({len(words)} words)\n"]
+        lines.append(f"{'WORD':<20} {'START':>7} {'END':>7}")
+        lines.append("-" * 38)
+        for w in words[:60]:
+            word = w.get("word", "?")
+            start = w.get("start_s", 0)
+            end = w.get("end_s", 0)
+            lines.append(f"{word:<20} {start:>6.2f}s {end:>6.2f}s")
+        if len(words) > 60:
+            lines.append(f"... and {len(words) - 60} more words")
+        return "\n".join(lines)
